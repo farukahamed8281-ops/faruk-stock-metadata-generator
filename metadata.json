@@ -1,0 +1,6 @@
+{
+  "name": "Faruk Stock Metadata Generator",
+  "description": "Minimalist AI-powered stock photography & vector metadata generator dashboard for Adobe Stock, Shutterstock, Magnific, and Getty.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,16 @@
+{
+  "short_name": "Faruk Metadata",
+  "name": "Faruk Stock Metadata Generator",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0b0d12",
+  "theme_color": "#f97316",
+  "display": "standalone",
+  "orientation": "any"
+}
