@@ -55,8 +55,8 @@ export function exportAssetsToCsv(
       ].join(',');
     });
     csvContent = [headers.join(','), ...rows].join('\r\n');
-  } else if (marketplace === 'Magnific' || (marketplace as string) === 'Freepik') {
-    // Magnific / Freepik CSV:
+  } else if (marketplace === 'Magnific') {
+    // Magnific CSV:
     // File, Title, Tags
     const headers = ['File', 'Title', 'Tags'];
     const rows = assets.map((asset) => {

@@ -76,7 +76,7 @@ export default function App() {
       autoRenameFilesToTitle: true,
       autoEmbedExifMetadata: true,
       includeTimestampInRename: false,
-      defaultTopic: 'Architectural Blueprint',
+      defaultTopic: 'General Stock',
       saveJpegInFolder: false,
       removeSpecialChars: true,
       titleLength: 76,
@@ -112,7 +112,10 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         const mergedKeys = Array.from(new Set([...(parsed.apiKeys || []), ...savedKeys]));
-        const currentModel = parsed.model || 'gemini-3.7-flash';
+        const currentModel = parsed.model || 'gemini-2.5-flash';
+        if (parsed.defaultTopic === 'Architectural Blueprint') {
+          parsed.defaultTopic = 'General Stock';
+        }
         return {
           ...defaultSettings,
           ...parsed,
@@ -266,15 +269,24 @@ export default function App() {
       title = title.toLowerCase();
     }
 
+    // Strictly enforce activeSettings.titleLength slider limit
+    const maxTitleLen = activeSettings.titleLength || 76;
+    if (maxTitleLen > 0 && title.length > maxTitleLen) {
+      const cut = title.substring(0, maxTitleLen);
+      const lastSpace = cut.lastIndexOf(' ');
+      title = (lastSpace > maxTitleLen * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+    }
+
     return title.trim();
   };
 
-  // Real-time settings updater that recalculates titles for active assets
+  // Real-time settings updater that recalculates titles and metadata for active assets
   const handleUpdateSettings = (newSettings: Partial<GenerationSettings>) => {
     setSettings((prev) => {
       const updated = { ...prev, ...newSettings };
 
       const titleRelatedKeys = [
+        'titleLength',
         'advanceIsolatedTransparent',
         'advanceIsolatedWhite',
         'advanceVector',
@@ -287,9 +299,9 @@ export default function App() {
         'removeSpecialChars',
       ];
 
-      const shouldRecalculate = titleRelatedKeys.some((k) => (newSettings as any)[k] !== undefined);
+      const shouldRecalculateTitle = titleRelatedKeys.some((k) => (newSettings as any)[k] !== undefined);
 
-      if (shouldRecalculate) {
+      if (shouldRecalculateTitle) {
         setAssets((currentAssets) =>
           currentAssets.map((asset) => {
             if (!asset.title && !asset.rawTitle) return asset;
@@ -308,6 +320,51 @@ export default function App() {
             const newTitle = formatTitleWithSettings(baseRaw, updatedAsset, updated);
             updatedAsset.title = newTitle;
             return updatedAsset;
+          })
+        );
+      }
+
+      // Real-time description length updates
+      if (newSettings.descLength !== undefined) {
+        const newMaxDesc = newSettings.descLength;
+        setAssets((currentAssets) =>
+          currentAssets.map((asset) => {
+            const baseDesc = asset.rawDescription || asset.description || '';
+            if (!baseDesc && newMaxDesc > 0) return asset;
+            let newDesc = '';
+            if (newMaxDesc > 0 && baseDesc) {
+              if (baseDesc.length > newMaxDesc) {
+                const cut = baseDesc.substring(0, newMaxDesc);
+                const lastSpace = cut.lastIndexOf(' ');
+                newDesc = (lastSpace > newMaxDesc * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+              } else {
+                newDesc = baseDesc;
+              }
+            }
+            return {
+              ...asset,
+              rawDescription: asset.rawDescription || baseDesc,
+              description: newDesc,
+            };
+          })
+        );
+      }
+
+      // Real-time keywords count updates
+      if (newSettings.keywordsCount !== undefined) {
+        const targetCount = newSettings.keywordsCount;
+        setAssets((currentAssets) =>
+          currentAssets.map((asset) => {
+            const baseKeywords = (asset.rawKeywords && asset.rawKeywords.length > 0) ? asset.rawKeywords : asset.keywords;
+            if (!baseKeywords || baseKeywords.length === 0) return asset;
+            const cleanKeywords = baseKeywords
+              .filter((kw) => !updated.negativeKeywords.includes(kw.toLowerCase()))
+              .slice(0, targetCount);
+            return {
+              ...asset,
+              rawKeywords: asset.rawKeywords || baseKeywords,
+              keywords: cleanKeywords,
+            };
           })
         );
       }
@@ -426,6 +483,12 @@ export default function App() {
     if (isGenerating) {
       isCancelledRef.current = true;
     }
+    // Clean up memory from object URLs
+    assets.forEach((a) => {
+      if (a.previewUrl && a.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(a.previewUrl);
+      }
+    });
     setAssets([]);
     addToast('info', 'Batch Cleared', 'All queued items removed.');
   };
@@ -444,7 +507,13 @@ export default function App() {
   };
 
   const handleDeleteAsset = (id: string) => {
-    setAssets((prev) => prev.filter((item) => item.id !== id));
+    setAssets((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.previewUrl && target.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((item) => item.id !== id);
+    });
     addToast('info', 'Item Removed');
   };
 
@@ -567,12 +636,18 @@ export default function App() {
 
       const rawTitle = data.title || target.filename;
       const formattedTitle = formatTitleWithSettings(rawTitle, target);
+      const finalDesc = settings.descLength === 0
+        ? ''
+        : (data.description || '').slice(0, settings.descLength);
+      const finalKeywords = cleanKeywords.slice(0, settings.keywordsCount);
 
       handleUpdateAsset(id, {
         rawTitle,
         title: formattedTitle,
-        description: data.description || '',
-        keywords: cleanKeywords,
+        description: finalDesc,
+        rawDescription: (data as any).rawDescription || data.description || '',
+        keywords: finalKeywords,
+        rawKeywords: (data as any).rawKeywords || data.keywords || cleanKeywords,
         topic: data.topic || target.topic || settings.defaultTopic,
         category: data.category || target.category,
         status: 'completed',
@@ -651,13 +726,19 @@ export default function App() {
 
         const rawTitle = data.title || currentAsset.filename;
         const formattedTitle = formatTitleWithSettings(rawTitle, currentAsset);
+        const finalDesc = settings.descLength === 0
+          ? ''
+          : (data.description || '').slice(0, settings.descLength);
+        const finalKeywords = cleanKeywords.slice(0, settings.keywordsCount);
 
         handleUpdateAsset(currentAsset.id, {
           rawTitle,
           title: formattedTitle,
           topic: currentAsset.topic || data.topic || settings.defaultTopic || data.category || 'Stock Design',
-          description: data.description || '',
-          keywords: cleanKeywords,
+          description: finalDesc,
+          rawDescription: (data as any).rawDescription || data.description || '',
+          keywords: finalKeywords,
+          rawKeywords: (data as any).rawKeywords || data.keywords || cleanKeywords,
           category: data.category || currentAsset.category,
           status: 'completed',
           generatedAt: new Date().toLocaleTimeString(),

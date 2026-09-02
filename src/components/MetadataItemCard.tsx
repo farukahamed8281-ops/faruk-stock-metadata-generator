@@ -409,7 +409,14 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
           <>
             {/* Title */}
             <div className="flex flex-col mb-2">
-              <span className="text-xs text-gray-400 font-medium mb-0.5">Title</span>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-gray-400 font-medium">Title</span>
+                {asset.title && (
+                  <span className="text-[11px] text-gray-400 font-mono">
+                    {asset.title.length} chars
+                  </span>
+                )}
+              </div>
               <div className="flex items-start justify-between gap-3 group">
                 <p
                   className={`text-xs sm:text-sm font-medium leading-snug select-text ${
@@ -458,7 +465,12 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
 
             {/* Description */}
             <div className="flex flex-col mb-2.5">
-              <span className="text-xs text-gray-400 font-medium mb-0.5">Description</span>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-gray-400 font-medium">Description</span>
+                <span className="text-[11px] text-gray-400 font-mono">
+                  {asset.description ? `${asset.description.length} chars` : '0 chars (None)'}
+                </span>
+              </div>
               <div className="flex items-start justify-between gap-3 group">
                 <div className="flex-1">
                   <p

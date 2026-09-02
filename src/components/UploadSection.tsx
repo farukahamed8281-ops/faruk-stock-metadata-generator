@@ -109,8 +109,12 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
 
   const pendingCount = assets.filter((a) => a.status === 'idle' || a.status === 'generating').length;
 
-  // Generate at least 32 slots (4 rows x 8 cols) as shown in the user screenshot
-  const totalSlotsCount = Math.max(32, Math.ceil(assets.length / 8) * 8);
+  // When assets are present, render slots for existing assets plus up to 8 empty slots (or at least 32 slots when few assets)
+  const totalSlotsCount = assets.length === 0
+    ? 32
+    : assets.length < 32
+    ? 32
+    : assets.length + (8 - (assets.length % 8 || 8));
   const slotsArray = Array.from({ length: totalSlotsCount });
 
   return (
@@ -142,24 +146,6 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         })}
       </div>
 
-      {/* Visual Inspection Status Banner */}
-      {!hasGeminiKey && onOpenApiKey && (
-        <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-xs text-orange-300 animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-orange-400 shrink-0 animate-pulse" />
-            <span>
-              <strong>Deep Vision Inspection:</strong> For 100% accurate visual analysis of subjects, people & corporate settings in your photos, connect your free Google Gemini API Key.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onOpenApiKey}
-            className="shrink-0 px-2.5 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-bold text-[11px] shadow-sm transition-all cursor-pointer"
-          >
-            Connect API Key
-          </button>
-        </div>
-      )}
 
       {/* Upload Area: Shows initial 3-icon splash when empty (matching initial theme), or grid when files added */}
       <div
@@ -223,8 +209,8 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
             </p>
           </div>
         ) : (
-          /* Populated 4x8 Grid of Slots with uploaded assets */
-          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 sm:gap-2.5 w-full">
+          /* Populated 4x8 Grid of Slots with uploaded assets - with responsive max-height scroll for high volume (e.g. 250 files) */
+          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 sm:gap-2.5 w-full max-h-[520px] overflow-y-auto pr-1 custom-scrollbar">
             {slotsArray.map((_, index) => {
               const asset = assets[index];
 

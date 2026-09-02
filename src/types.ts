@@ -2,7 +2,6 @@ export type Marketplace =
   | 'General'
   | 'Adobe Stock'
   | 'Shutterstock'
-  | 'Freepik'
   | 'Magnific'
   | 'Getty Images'
   | 'iStock'
@@ -30,7 +29,9 @@ export interface StockAsset {
   title: string;
   rawTitle?: string;
   description: string;
+  rawDescription?: string;
   keywords: string[];
+  rawKeywords?: string[];
   marketplace: Marketplace;
   generatedAt?: string;
 

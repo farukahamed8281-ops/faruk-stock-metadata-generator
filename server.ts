@@ -668,7 +668,7 @@ Asset Information:
 - Target Platform: ${marketplace}
 - User Category Hint: ${category}
 - Maximum Title Length: ${titleLength} characters
-- Maximum Description Length: ${descLength} characters
+- Maximum Description Length: ${descLength} characters ${descLength === 0 ? '(Strictly EMPTY string "" since length is 0)' : ''}
 - Required Keywords Count: Exactly ${keywordsCount} keywords
 ${advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The user has specified this is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include "transparent background", "isolated", "png", "cut out". DO NOT say black or dark background.' : ''}
 ${advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The user has specified this is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
@@ -719,7 +719,7 @@ STRICT STOCK COMPLIANCE & SEO RULES:
               contents: promptParts,
               config: {
                 temperature: 0.15,
-                maxOutputTokens: 800, // Reduced from 4096 to 800 for 10x faster generation latency
+                maxOutputTokens: 2048,
                 responseMimeType: 'application/json',
                 responseSchema: {
                   type: Type.OBJECT,
@@ -745,11 +745,40 @@ STRICT STOCK COMPLIANCE & SEO RULES:
           if (response && response.text) {
             const parsed = parseAiJsonResponse(response.text);
             if (parsed && (parsed.title || parsed.keywords)) {
+              let resTitle = (parsed.title || filename).trim();
+              if (titleLength > 0 && resTitle.length > titleLength) {
+                const cut = resTitle.substring(0, titleLength);
+                const lastSpace = cut.lastIndexOf(' ');
+                resTitle = (lastSpace > titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+              }
+
+              let resDesc = '';
+              if (descLength > 0 && parsed.description) {
+                resDesc = parsed.description.trim();
+                if (resDesc.length > descLength) {
+                  const cut = resDesc.substring(0, descLength);
+                  const lastSpace = cut.lastIndexOf(' ');
+                  resDesc = (lastSpace > descLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+                }
+              }
+
+              let resKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+              resKeywords = resKeywords
+                .map((k: any) => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
+                .filter((k: string) => k.length > 0 && !k.includes(',') && !k.includes('"'));
+              resKeywords = Array.from(new Set(resKeywords));
+              if (keywordsCount > 0) {
+                resKeywords = resKeywords.slice(0, keywordsCount);
+              }
+
               return res.json({
-                title: parsed.title || filename,
+                title: resTitle,
+                rawTitle: parsed.title || resTitle,
                 topic: parsed.topic || parsed.category || category,
-                description: parsed.description || '',
-                keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+                description: resDesc,
+                rawDescription: parsed.description || '',
+                keywords: resKeywords,
+                rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
                 category: parsed.category || category,
                 source: `Google Gemini (${targetModel})`,
               });

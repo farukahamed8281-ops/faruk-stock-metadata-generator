@@ -110,7 +110,7 @@ export async function exportAssetsToZip(
       ].join(',');
     });
     csvContent += rows.join('\n');
-  } else if (marketplace === 'Magnific' || (marketplace as string) === 'Freepik') {
+  } else if (marketplace === 'Magnific') {
     csvContent += 'Filename,Title,Tags\n';
     const rows = assets.map((asset) => {
       const exportName = getExportFilename(asset);
