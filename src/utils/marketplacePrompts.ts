@@ -25,8 +25,22 @@ CRITICAL UNIVERSAL MICROSTOCK SEO MANDATES:
   The first keywords MUST be: "happy", "woman", "dance fitness", "workout", "aerobics class", "group workout", "fitness class", "exercise".
 - The microstock search algorithm (especially Adobe Stock Sensei & Shutterstock mShot) relies heavily on the first keywords matching the Title. If the Title words are missing or scattered down the list, the asset will NOT rank!
 
-3. STRICT TRADEMARK & BRAND BAN:
-- NEVER use protected brands or fitness trademarks (e.g. STRICTLY BANNED: "zumba", "crossfit", "peloton", "nike", "adidas", "apple", "iphone", etc.). Use generic descriptors like "dance fitness", "aerobics", "cardio workout", "sports gear", "smartphone".
+3. STRICT ZERO-TOLERANCE TRADEMARK & REGISTERED BRAND BAN:
+- ABSOLUTELY NEVER USE ANY REGISTERED TRADEMARKS, BRAND NAMES, COMPANY NAMES, OR PATENTED PRODUCT NAMES in the Title or Keywords.
+- STRICTLY FORBIDDEN EXAMPLES:
+  * Fitness: "bosu", "bosu ball", "zumba", "crossfit", "peloton", "trx", "theraband", "soulcycle", "fitbit", "garmin", "whoop"
+  * Sportswear: "nike", "adidas", "puma", "reebok", "under armour", "asics", "lululemon", "gymshark", "new balance"
+  * Tech/Electronics: "apple", "iphone", "ipad", "macbook", "airpods", "apple watch", "samsung", "galaxy", "pixel", "android", "playstation", "xbox", "gopro", "dji", "canon", "nikon", "sony"
+  * Food/Auto/Retail: "coca cola", "pepsi", "starbucks", "mcdonalds", "red bull", "tesla", "bmw", "mercedes", "ferrari", "amazon", "gucci"
+- ALWAYS USE 100% GENERIC COMMERCIAL DESCRIPTIONS ONLY:
+  * Use "half balance ball" or "balance trainer" (NOT "bosu" or "bosu ball")
+  * Use "dance fitness" or "aerobics" (NOT "zumba")
+  * Use "functional fitness" or "high intensity training" (NOT "crossfit")
+  * Use "smartwatch" or "fitness tracker" (NOT "fitbit" or "apple watch")
+  * Use "smartphone" (NOT "iphone" or "galaxy")
+  * Use "digital tablet" (NOT "ipad")
+  * Use "laptop computer" (NOT "macbook")
+  * Use "sportswear" or "activewear" (NOT "nike", "adidas", "lululemon")
 `;
 
 export function getMarketplaceSeoProfile(

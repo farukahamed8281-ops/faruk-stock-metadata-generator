@@ -163,6 +163,31 @@ export default function App() {
     }
   }, [settings]);
 
+  // Clean any legacy trademarks from existing in-memory assets
+  useEffect(() => {
+    setAssets((prev) => {
+      let changed = false;
+      const updated = prev.map((asset) => {
+        if (!asset.title) return asset;
+        const sanitizedT = sanitizeTitle(asset.title);
+        let sanitizedK = asset.keywords;
+        if (asset.keywords && asset.keywords.length > 0) {
+          sanitizedK = alignKeywordsWithTitle(sanitizedT, asset.keywords, settings.keywordsCount || 30);
+        }
+        if (sanitizedT !== asset.title || sanitizedK !== asset.keywords) {
+          changed = true;
+          return {
+            ...asset,
+            title: sanitizedT,
+            keywords: sanitizedK,
+          };
+        }
+        return asset;
+      });
+      return changed ? updated : prev;
+    });
+  }, [settings.keywordsCount]);
+
   // State: Generation flow
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPaused, setIsPaused] = useState(false);

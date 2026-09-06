@@ -28,16 +28,137 @@ export const BANNED_COUNTRY_TERMS = [
   'thai', 'thailand',
 ];
 
+export const TRADEMARK_REPLACEMENTS: Record<string, string> = {
+  // Fitness & Gym Equipment
+  'bosu ball': 'half balance ball',
+  'bosu': 'balance trainer',
+  'zumba': 'dance fitness',
+  'crossfit': 'functional fitness',
+  'peloton': 'stationary exercise bike',
+  'trx': 'suspension straps',
+  'theraband': 'resistance band',
+  'soulcycle': 'indoor cycling',
+  'orangetheory': 'group fitness training',
+  'les mills': 'group fitness',
+  'bodypump': 'barbell fitness class',
+  'fitbit': 'fitness tracker watch',
+  'whoop': 'fitness band',
+  'garmin': 'sports watch',
+  'apple watch': 'smartwatch',
+  'galaxy watch': 'smartwatch',
+  'smart watch': 'smartwatch',
+
+  // Tech & Electronics
+  'iphone': 'smartphone',
+  'ipad': 'digital tablet',
+  'macbook': 'laptop computer',
+  'imac': 'desktop computer',
+  'airpods': 'wireless earbuds',
+  'airpod': 'wireless earbud',
+  'apple': 'tech device',
+  'samsung': 'mobile device',
+  'galaxy phone': 'smartphone',
+  'pixel phone': 'smartphone',
+  'android': 'mobile system',
+  'playstation': 'gaming console',
+  'xbox': 'gaming console',
+  'gopro': 'action camera',
+  'dji': 'camera drone',
+  'canon': 'professional camera',
+  'nikon': 'dslr camera',
+  'sony camera': 'mirrorless camera',
+
+  // Sportswear & Brands
+  'nike': 'sportswear',
+  'adidas': 'athletic wear',
+  'puma': 'sportswear',
+  'reebok': 'athletic clothing',
+  'under armour': 'activewear',
+  'asics': 'running shoes',
+  'lululemon': 'yoga apparel',
+  'gymshark': 'gym activewear',
+  'new balance': 'sneakers',
+
+  // Food & Drink
+  'coca cola': 'cola soda',
+  'coca-cola': 'cola drink',
+  'coke': 'soda drink',
+  'pepsi': 'cola beverage',
+  'starbucks': 'takeaway coffee cup',
+  'mcdonalds': 'fast food',
+  "mcdonald's": 'fast food meal',
+  'red bull': 'energy drink',
+  'monster energy': 'energy drink',
+  'gatorade': 'sports drink',
+
+  // Auto
+  'tesla': 'electric car',
+  'bmw': 'luxury car',
+  'mercedes': 'luxury vehicle',
+  'mercedes benz': 'modern automobile',
+  'ferrari': 'sports car',
+  'porsche': 'sports car',
+  'harley davidson': 'motorcycle',
+  'vespa': 'scooter'
+};
+
 export const BANNED_TRADEMARKS = [
-  'zumba', 'crossfit', 'peloton', 'pilates studio',
-  'nike', 'adidas', 'puma', 'reebok', 'under armour', 'asics', 'lululemon',
-  'apple', 'iphone', 'ipad', 'macbook', 'imac', 'airpods', 'apple watch',
-  'samsung', 'galaxy', 'sony', 'playstation', 'canon', 'nikon',
-  'google', 'android', 'pixel', 'windows', 'microsoft',
+  // Fitness, Gym & Wellness brands
+  'zumba', 'crossfit', 'peloton', 'pilates studio', 'bosu', 'bosu ball', 'trx', 'theraband',
+  'soulcycle', 'orangetheory', 'les mills', 'bodypump', 'barre3', 'pure barre',
+  'fitbit', 'garmin', 'whoop', 'suunto', 'polar', 'nordictrack', 'bowflex',
+  'allegro reformer', 'kettlebell kings',
+
+  // Sportswear, Footwear & Apparel brands
+  'nike', 'adidas', 'puma', 'reebok', 'under armour', 'asics', 'lululemon', 'gymshark',
+  'new balance', 'fila', 'champion', 'columbia', 'the north face', 'patagonia',
+  'vans', 'converse', 'jordan', 'air jordan', 'skechers', 'oakley', 'ray ban', 'ray-ban',
+  'speedo', 'arena', 'mizuno', 'salomon', 'aloyoga', 'alo yoga', 'fabletics', 'sweaty betty',
+
+  // Tech, Gadgets, Cameras & Hardware
+  'apple', 'iphone', 'ipad', 'macbook', 'imac', 'airpods', 'apple watch', 'iwatch', 'ipod',
+  'siri', 'magsafe', 'lightning cable',
+  'samsung', 'galaxy', 'galaxy tab', 'galaxy watch', 'bixby',
+  'google', 'pixel', 'android', 'chromebook', 'nest', 'chromecast',
+  'sony', 'playstation', 'ps4', 'ps5', 'walkman', 'bravia',
+  'microsoft', 'windows', 'xbox', 'surface', 'cortana',
+  'dell', 'alienware', 'hp', 'hewlett packard', 'lenovo', 'thinkpad', 'asus', 'acer', 'msi', 'logitech',
+  'canon', 'nikon', 'fujifilm', 'lumix', 'panasonic', 'leica', 'hasselblad', 'olympus', 'pentax',
+  'gopro', 'dji', 'mavic', 'osmo', 'phantom',
+  'intel', 'amd', 'nvidia', 'geforce', 'snapdragon', 'qualcomm', 'kindle',
+
+  // Social Media, Software & Streaming
   'facebook', 'meta', 'instagram', 'tiktok', 'twitter', 'x corp', 'youtube', 'snapchat', 'whatsapp',
-  'gucci', 'prada', 'chanel', 'louis vuitton', 'hermes', 'rolex',
-  'coca cola', 'pepsi', 'starbucks', 'mcdonalds', 'red bull',
-  'tesla', 'bmw', 'mercedes', 'audi', 'ferrari', 'porsche', 'ford', 'toyota', 'honda',
+  'telegram', 'linkedin', 'pinterest', 'reddit', 'zoom', 'skype', 'teams', 'slack',
+  'spotify', 'netflix', 'disney', 'hulu', 'amazon prime', 'tinder', 'bumble', 'discord', 'twitch', 'wechat',
+
+  // Fashion, Luxury & Retail
+  'gucci', 'prada', 'chanel', 'louis vuitton', 'hermes', 'rolex', 'dior', 'balenciaga', 'versace',
+  'armani', 'burberry', 'zara', 'h&m', 'calvin klein', 'tommy hilfiger', 'ralph lauren',
+  "victoria's secret", "levi's", 'levis', 'diesel', 'timberland', 'clarks', 'birkenstock', 'crocs',
+  'tiffany', 'cartier', 'omega', 'tag heuer', 'seiko', 'casio', 'g shock', 'g-shock',
+
+  // Food, Beverage & Fast Food
+  'coca cola', 'coca-cola', 'coke', 'pepsi', 'starbucks', 'mcdonalds', "mcdonald's", 'burger king',
+  'kfc', 'subway', 'dominos', 'pizza hut', "wendy's", 'taco bell',
+  'red bull', 'monster energy', 'gatorade', 'powerade', 'nescafe', 'nestle', 'heineken', 'budweiser',
+  'corona', 'oreo', 'nutella', 'lays', 'pringles', 'doritos', 'kit kat', 'snickers',
+
+  // Automotive & Transport
+  'tesla', 'bmw', 'mercedes', 'mercedes benz', 'mercedes-benz', 'audi', 'ferrari', 'porsche',
+  'lamborghini', 'maserati', 'bugatti', 'bentley', 'rolls royce', 'ford', 'mustang',
+  'toyota', 'honda', 'hyundai', 'kia', 'volkswagen', 'nissan', 'chevrolet', 'chevy', 'jeep',
+  'harley davidson', 'vespa', 'ducati', 'yamaha', 'kawasaki', 'land rover', 'range rover',
+  'subaru', 'mazda', 'volvo', 'lexus',
+
+  // E-commerce, Finance & Payment
+  'amazon', 'ebay', 'walmart', 'target', 'ikea', 'costco', 'alibaba', 'aliexpress',
+  'paypal', 'visa', 'mastercard', 'amex', 'american express', 'stripe',
+
+  // Stock Agencies (Spam)
+  'shutterstock', 'adobe stock', 'getty images', 'getty', 'istock', 'dreamstime',
+  'vecteezy', 'depositphotos', 'freepik', '123rf', 'alamy', 'pond5', 'envato',
+  'unsplash', 'pexels', 'pixabay'
 ];
 
 export const BANNED_SPAM_WORDS = [
@@ -97,9 +218,17 @@ export function sanitizeTitle(title: string): string {
     cleaned = cleaned.replace(reg8, '');
   }
 
+  // Apply all smart trademark to generic replacements
+  for (const [tm, generic] of Object.entries(TRADEMARK_REPLACEMENTS)) {
+    const escaped = tm.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const reg = new RegExp(`\\b${escaped}\\b`, 'gi');
+    cleaned = cleaned.replace(reg, generic);
+  }
+
   // Remove banned trademarks from title
   for (const tm of BANNED_TRADEMARKS) {
-    const reg = new RegExp(`\\b${tm}\\b`, 'gi');
+    const escaped = tm.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const reg = new RegExp(`\\b${escaped}\\b`, 'gi');
     cleaned = cleaned.replace(reg, '');
   }
 
@@ -128,7 +257,14 @@ export function isKeywordBanned(kw: string): boolean {
     }
   }
 
-  // Check trademarks
+  // Check trademark replacement keys (e.g. 'bosu', 'zumba', 'iphone', 'nike', etc.)
+  for (const tm of Object.keys(TRADEMARK_REPLACEMENTS)) {
+    if (lower === tm || lower.startsWith(tm + ' ') || lower.endsWith(' ' + tm) || lower.includes(` ${tm} `)) {
+      return true;
+    }
+  }
+
+  // Check all banned trademarks and brands
   for (const tm of BANNED_TRADEMARKS) {
     if (lower === tm || lower.startsWith(tm + ' ') || lower.endsWith(' ' + tm) || lower.includes(` ${tm} `)) {
       return true;
@@ -177,6 +313,18 @@ export function alignKeywordsWithTitle(
   const sanitizeTerm = (term: string): string => {
     let clean = (term || '').toLowerCase().trim();
     if (!clean || clean.length < 2) return '';
+
+    // Convert trademark brand to generic term if mapped
+    if (TRADEMARK_REPLACEMENTS[clean]) {
+      clean = TRADEMARK_REPLACEMENTS[clean];
+    } else {
+      for (const [tm, generic] of Object.entries(TRADEMARK_REPLACEMENTS)) {
+        if (clean === tm || clean.startsWith(tm + ' ') || clean.endsWith(' ' + tm) || clean.includes(` ${tm} `)) {
+          const escaped = tm.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+          clean = clean.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), generic).replace(/\s+/g, ' ').trim();
+        }
+      }
+    }
 
     // Remove country terms
     for (const c of BANNED_COUNTRY_TERMS) {
