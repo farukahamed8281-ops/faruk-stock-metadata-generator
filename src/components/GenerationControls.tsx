@@ -163,31 +163,62 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
       </div>
 
       {/* Batch Size (Concurrent) */}
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5" id="batch-concurrency-control">
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5 text-gray-300 font-medium">
-            <span>Batch Size (Concurrent)</span>
+            <span>Concurrent Batches</span>
             <div className="relative group">
               <Info className="w-3.5 h-3.5 text-gray-500 cursor-pointer" />
-              <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#0d0f14] border border-gray-700 text-gray-300 text-[11px] p-2 rounded w-48 shadow-xl">
-                Number of assets processed concurrently in parallel.
+              <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#0d0f14] border border-gray-700 text-gray-300 text-[11px] p-2.5 rounded-lg w-56 shadow-xl leading-relaxed">
+                Processes 2-3 files simultaneously in parallel. If any API hits its quota or rate limit, it automatically pauses for 3.5s and calls the next API key or model.
               </div>
             </div>
           </div>
-          <span className="bg-[#242b38] border border-[#353f52] px-2 py-0.5 rounded text-[11px] font-bold text-gray-200">
-            {settings.batchSize}x
-          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              id="batch-2x-btn"
+              onClick={() => onUpdateSettings({ batchSize: 2 })}
+              className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors cursor-pointer ${
+                settings.batchSize === 2
+                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
+                  : 'bg-[#1e2430] text-gray-400 border-[#2d3444] hover:text-gray-200'
+              }`}
+            >
+              2x
+            </button>
+            <button
+              type="button"
+              id="batch-3x-btn"
+              onClick={() => onUpdateSettings({ batchSize: 3 })}
+              className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors cursor-pointer ${
+                settings.batchSize === 3
+                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
+                  : 'bg-[#1e2430] text-gray-400 border-[#2d3444] hover:text-gray-200'
+              }`}
+            >
+              3x
+            </button>
+            <span className="bg-[#242b38] border border-[#353f52] px-2 py-0.5 rounded text-[11px] font-bold text-gray-200">
+              {settings.batchSize || 2}x
+            </span>
+          </div>
         </div>
         <input
           type="range"
           min="1"
-          max="8"
+          max="4"
           step="1"
-          value={settings.batchSize || 4}
+          value={settings.batchSize || 2}
           onChange={(e) => onUpdateSettings({ batchSize: Number(e.target.value) })}
           style={{ accentColor: activeThemeColor }}
           className="w-full h-1.5 bg-[#2a3140] rounded-lg appearance-none cursor-pointer"
         />
+        <div className="flex justify-between text-[10px] text-gray-400">
+          <span>1x (Gentle)</span>
+          <span className="text-orange-400 font-medium">2x - 3x (Parallel)</span>
+          <span>4x (Fast)</span>
+        </div>
       </div>
 
       {/* Requests Per Minute (RPM) */}

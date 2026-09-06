@@ -359,12 +359,12 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-[#141822] border border-[#202736] text-[11px] text-gray-500 mt-4 flex flex-col gap-1">
+          <div className="p-3 rounded-xl bg-[#141822] border border-[#202736] text-[11px] text-gray-400 mt-4 flex flex-col gap-1">
             <div className="flex items-center gap-1 text-orange-400 font-semibold">
               <RotateCw className="w-3.5 h-3.5" />
-              <span>Auto Key Rotation</span>
+              <span>Auto Key Failover (3.5s)</span>
             </div>
-            <span>Keys automatically rotate when rate limits are reached.</span>
+            <span>When one API hits its rate limit, it automatically pauses 3.5 seconds and calls the next API key in your pool.</span>
           </div>
         </div>
 

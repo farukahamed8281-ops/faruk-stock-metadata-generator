@@ -18,6 +18,7 @@ import { exportAssetsToCsv } from './utils/csvExporter';
 import { exportAssetsToZip } from './utils/zipExporter';
 import { getMarketplaceSeoProfile } from './utils/marketplacePrompts';
 import { generateMetadataForAsset, fileToFastThumbnail } from './services/aiMetadataService';
+import { sanitizeTitle, alignKeywordsWithTitle } from './utils/stockSeoSanitizer';
 
 // Helper: Fast lightweight thumbnail conversion for AI vision (400px @ 0.70 JPEG = ~12-18KB, uploads & processes in milliseconds)
 const fileToAiThumbnailBase64 = fileToFastThumbnail;
@@ -69,7 +70,7 @@ export default function App() {
     const defaultSettings: GenerationSettings = {
       aiProvider: 'Google Gemini',
       model: 'gemini-3.7-flash',
-      batchSize: 4, // 4x concurrent parallel processing for ultra-fast generation
+      batchSize: 2, // 2-3 concurrent parallel batches (matches user request)
       rpmEnabled: false,
       rpmLimit: 15,
       autoDownloadCsv: false,
@@ -275,6 +276,9 @@ export default function App() {
     // Clean any accidental (Chars: XX) tags from AI output
     title = title.replace(/\s*\(\s*Chars?:\s*\d+\s*\)/gi, '').trim();
 
+    // STRICT MICROSTOCK COMPLIANCE: Remove specific country names, nationalities, and trademarks
+    title = sanitizeTitle(title);
+
     if (activeSettings.titleCaseStyle === 'titleCase') {
       title = title.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.substring(1).toLowerCase());
     } else if (activeSettings.titleCaseStyle === 'sentenceCase' || activeSettings.titleCaseStyle === 'default') {
@@ -335,6 +339,11 @@ export default function App() {
             };
             const newTitle = formatTitleWithSettings(baseRaw, updatedAsset, updated);
             updatedAsset.title = newTitle;
+            if (updatedAsset.keywords && updatedAsset.keywords.length > 0) {
+              const baseKeywords = (updatedAsset.rawKeywords && updatedAsset.rawKeywords.length > 0) ? updatedAsset.rawKeywords : updatedAsset.keywords;
+              const filtered = baseKeywords.filter((kw) => !updated.negativeKeywords.includes(kw.toLowerCase()));
+              updatedAsset.keywords = alignKeywordsWithTitle(newTitle, filtered, updated.keywordsCount);
+            }
             return updatedAsset;
           })
         );
@@ -373,9 +382,8 @@ export default function App() {
           currentAssets.map((asset) => {
             const baseKeywords = (asset.rawKeywords && asset.rawKeywords.length > 0) ? asset.rawKeywords : asset.keywords;
             if (!baseKeywords || baseKeywords.length === 0) return asset;
-            const cleanKeywords = baseKeywords
-              .filter((kw) => !updated.negativeKeywords.includes(kw.toLowerCase()))
-              .slice(0, targetCount);
+            const filtered = baseKeywords.filter((kw) => !updated.negativeKeywords.includes(kw.toLowerCase()));
+            const cleanKeywords = alignKeywordsWithTitle(asset.title || asset.filename, filtered, targetCount);
             return {
               ...asset,
               rawKeywords: asset.rawKeywords || baseKeywords,
@@ -629,7 +637,7 @@ export default function App() {
     const target = assets.find((a) => a.id === id);
     if (!target) return;
 
-    handleUpdateAsset(id, { status: 'generating' });
+    handleUpdateAsset(id, { status: 'generating', error: undefined });
 
     try {
       const data = await generateMetadataForAsset(target, settings, selectedMarketplace, 0);
@@ -643,7 +651,8 @@ export default function App() {
       const finalDesc = settings.descLength === 0
         ? ''
         : (data.description || '').slice(0, settings.descLength);
-      const finalKeywords = cleanKeywords.slice(0, settings.keywordsCount);
+      // STRICT RANKING ALIGNMENT: Title keywords appear first (#1 to #10) in exact sequential order
+      const finalKeywords = alignKeywordsWithTitle(formattedTitle, cleanKeywords, settings.keywordsCount);
 
       handleUpdateAsset(id, {
         rawTitle,
@@ -655,6 +664,7 @@ export default function App() {
         topic: data.topic || target.topic || settings.defaultTopic,
         category: data.category || target.category,
         status: 'completed',
+        error: undefined,
         generatedAt: new Date().toLocaleTimeString(),
       });
 
@@ -666,7 +676,7 @@ export default function App() {
     }
   };
 
-  // Main Batch Generator (Blazing fast parallel pipeline)
+  // Main Batch Generator (Blazing fast parallel pipeline with quota protection)
   const handleGenerate = async () => {
     if (assets.length === 0 || isGenerating) return;
 
@@ -703,8 +713,10 @@ export default function App() {
 
     const targetList = assetsToProcess.length > 0 ? assetsToProcess : assets;
 
-    // Concurrency respects user batch size (e.g. 4x or 6x parallel) or 1 if RPM strictly enabled
-    const concurrency = settings.rpmEnabled && settings.rpmLimit > 0 ? 1 : Math.max(1, settings.batchSize || 4);
+    // Concurrency: Process 2-3 items simultaneously in parallel (strictly respects user request)
+    const concurrency = settings.rpmEnabled && settings.rpmLimit > 0
+      ? 1
+      : Math.min(3, Math.max(1, settings.batchSize || 2));
     let nextIndex = 0;
     let completedCount = 0;
 
@@ -718,11 +730,41 @@ export default function App() {
         if (isCancelledRef.current) return;
       }
 
-      handleUpdateAsset(currentAsset.id, { status: 'generating' });
-      setGenerationStatusMessage(`Processing ${currentAsset.filename} (${completedCount + 1}/${targetList.length})...`);
+      handleUpdateAsset(currentAsset.id, { status: 'generating', error: undefined });
+      setGenerationStatusMessage(`Processing ${currentAsset.filename} (${completedCount + 1}/${targetList.length}) [${concurrency}x parallel]...`);
 
       try {
-        const data = await generateMetadataForAsset(currentAsset, settings, selectedMarketplace, itemIndex);
+        let data: any = null;
+        let lastError: any = null;
+
+        // Auto-retry & switch to next API with 3.5s pause if rate limit or quota occurs
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            data = await generateMetadataForAsset(currentAsset, settings, selectedMarketplace, itemIndex + attempt);
+            lastError = null;
+            break;
+          } catch (err: any) {
+            lastError = err;
+            const msg = (err?.message || '').toLowerCase();
+            const isQuotaError =
+              msg.includes('quota') ||
+              msg.includes('rate') ||
+              msg.includes('429') ||
+              msg.includes('resourceexhausted') ||
+              msg.includes('resource_exhausted');
+
+            if (isQuotaError && attempt < 2 && !isCancelledRef.current) {
+              setGenerationStatusMessage(`API Limit reached: pausing 3.5s and calling next API for ${currentAsset.filename}...`);
+              await new Promise((r) => setTimeout(r, 3500));
+              continue;
+            }
+            break;
+          }
+        }
+
+        if (!data) {
+          throw lastError || new Error('Generation failed');
+        }
 
         let cleanKeywords = (data.keywords || []).filter(
           (kw: string) => !settings.negativeKeywords.includes(kw.toLowerCase())
@@ -733,7 +775,8 @@ export default function App() {
         const finalDesc = settings.descLength === 0
           ? ''
           : (data.description || '').slice(0, settings.descLength);
-        const finalKeywords = cleanKeywords.slice(0, settings.keywordsCount);
+        // STRICT RANKING ALIGNMENT: First keywords match Title in exact sequential order
+        const finalKeywords = alignKeywordsWithTitle(formattedTitle, cleanKeywords, settings.keywordsCount);
 
         handleUpdateAsset(currentAsset.id, {
           rawTitle,
@@ -745,6 +788,7 @@ export default function App() {
           rawKeywords: (data as any).rawKeywords || data.keywords || cleanKeywords,
           category: data.category || currentAsset.category,
           status: 'completed',
+          error: undefined,
           generatedAt: new Date().toLocaleTimeString(),
         });
       } catch (err: any) {
@@ -759,7 +803,7 @@ export default function App() {
         setGenerationProgress(completedPercent);
       }
 
-      // Respect RPM throttling ONLY if explicitly enabled
+      // Respect RPM throttling if explicitly enabled
       if (settings.rpmEnabled && settings.rpmLimit > 0 && itemIndex < targetList.length - 1) {
         setGenerationStatusMessage(`Throttling RPM (${settings.rpmLimit}/min limit)...`);
         const delayMs = (60 / settings.rpmLimit) * 1000;
@@ -771,6 +815,10 @@ export default function App() {
       while (nextIndex < targetList.length && !isCancelledRef.current) {
         const idx = nextIndex++;
         await processItem(targetList[idx], idx);
+        // Gentle inter-request spacing to stay comfortably under the 20 RPM Google Gemini free limit
+        if (!settings.rpmEnabled && nextIndex < targetList.length && !isCancelledRef.current) {
+          await new Promise((r) => setTimeout(r, 1200));
+        }
       }
     };
 

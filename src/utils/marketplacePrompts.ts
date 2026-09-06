@@ -13,6 +13,22 @@ export interface MarketplaceSeoProfile {
   systemPrompt: string;
 }
 
+const GLOBAL_SEO_RESTRICTIONS = `
+CRITICAL UNIVERSAL MICROSTOCK SEO MANDATES:
+1. STRICT BAN ON SPECIFIC COUNTRY & NATIONALITY NAMES:
+- NEVER use specific country names, nationalities, or regional ethnic identifiers (e.g. NEVER use "indian", "asian", "american", "bengali", "caucasian", "african", "chinese", "japanese", "hispanic", "european", "pakistani", etc.) in the Title or Keywords.
+- Use generic, universal commercial terms like "woman", "man", "person", "people", "diverse group", "model", "athlete", "team". Global stock buyers demand universal, non-geographically biased imagery!
+
+2. TITLE-TO-KEYWORD STRICT RANKING ALIGNMENT (ALGORITHM COMPLIANCE):
+- The first 5 to 10 keywords MUST be extracted directly from the generated Title, arranged in the EXACT sequential order of the Title!
+- Example: If Title is "Happy woman enjoying dance fitness workout in group aerobics class",
+  The first keywords MUST be: "happy", "woman", "dance fitness", "workout", "aerobics class", "group workout", "fitness class", "exercise".
+- The microstock search algorithm (especially Adobe Stock Sensei & Shutterstock mShot) relies heavily on the first keywords matching the Title. If the Title words are missing or scattered down the list, the asset will NOT rank!
+
+3. STRICT TRADEMARK & BRAND BAN:
+- NEVER use protected brands or fitness trademarks (e.g. STRICTLY BANNED: "zumba", "crossfit", "peloton", "nike", "adidas", "apple", "iphone", etc.). Use generic descriptors like "dance fitness", "aerobics", "cardio workout", "sports gear", "smartphone".
+`;
+
 export function getMarketplaceSeoProfile(
   marketplace: Marketplace = 'Adobe Stock',
   titleLength?: number,
@@ -35,25 +51,28 @@ export function getMarketplaceSeoProfile(
         rules: [
           'Title: Sentence case only (60-76 characters). No quotes or (Chars: XX) tags.',
           'Formula: [Main Subject] + [Primary Action/Attribute] + [Setting/Concept].',
-          'First 5-10 Keywords: Core subject and commercial intent (Adobe weights first 10 keywords most).',
-          'Full Keywords: 25-30 singular base terms (e.g. "woman", "laptop") in strict descending relevance.',
+          'Strict Country/Nationality Ban: NEVER use "indian", "asian", "american", "caucasian", etc. Use "woman", "man", "person".',
+          'First 5-10 Keywords: MUST be the exact words and phrases from the Title in the same order.',
+          'Banned Trademarks: Strictly NO "zumba", "crossfit", "peloton", "nike", etc.',
           'Banned Spam: "stock photo", "commercial use", "free", "image", "picture", "photo", "vector", "background".',
         ],
         systemPrompt: `Act as a strict Microstock SEO Metadata Engine specifically optimized for Adobe Stock.
+${GLOBAL_SEO_RESTRICTIONS}
 
-RULES:
+ADOBE STOCK SPECIFIC RULES:
 1. Title:
 - Sentence case only.
 - Length strictly between 60 and ${maxTitle} characters (including spaces).
 - Strict formula: [Main Subject] + [Primary Action/Attribute] + [Setting/Concept].
 - High commercial buyer intent. No artificial character count tags, no quotes.
+- No country/nationality names ("indian", "asian", etc.).
 
 2. Keywords:
 - Provide exactly ${totalKw} highly relevant, commercial microstock keywords ordered by strict descending relevance.
-- First 5-10 keywords must directly reflect the core subject and commercial value (Adobe Sensei top-10 weighting).
+- First 5-10 keywords MUST be the exact terms extracted directly from your generated Title in sequential order (Adobe Sensei top-10 weighting).
 - Singular base terms preferred (e.g. woman, laptop).
 - Banned spam words: "stock photo", "commercial use", "free", "free photo", "image", "picture", "photo", "vector" (unless vector asset), "background" (unless background is the primary subject).
-- Strictly NO brand names, trademarks, or logos.`,
+- Strictly NO brand names or trademarks (e.g. no "zumba", "crossfit", "peloton").`,
       };
     }
 
@@ -72,23 +91,26 @@ RULES:
           'Shutterstock mShot algorithm rewards rich descriptive titles (80-120 chars) and comprehensive keyword breadth (40-45 keywords) matching compound buyer queries.',
         rules: [
           'Title: Rich, descriptive sentence case (80-120 characters) detailing subject, lighting, angle, and setting.',
+          'Strict Country Ban: NO country names ("indian", "asian", etc.). Use universal terms.',
+          'First 8-10 Keywords: Directly extracted from Title in exact order.',
           'Broad Keyword Coverage: 35-45 keywords covering visual elements, actions, colors, and industry themes.',
-          'Conceptual & Synonyms: Include related lifestyle, business, technology, and mood tags.',
-          'Banned Spam: "stock", "photo", "high resolution", "DSLR", "RAW", camera models, trademarks.',
+          'Banned Spam: "stock", "photo", "high resolution", "DSLR", "RAW", camera models, trademarks (no "zumba").',
         ],
         systemPrompt: `Act as a strict Microstock SEO Metadata Engine specifically optimized for Shutterstock.
+${GLOBAL_SEO_RESTRICTIONS}
 
-RULES:
+SHUTTERSTOCK SPECIFIC RULES:
 1. Title:
 - Sentence case only.
 - Length between 80 and ${maxTitle} characters.
-- Must be rich and descriptive, identifying the exact subject, action, lighting, angle, and setting to capture multi-word buyer searches.
-- No artificial tags, no quotes.
+- Rich and descriptive, identifying the exact subject, action, lighting, angle, and setting to capture multi-word buyer searches.
+- No country/nationality tags.
 
 2. Keywords:
 - Provide exactly ${totalKw} rich, high-converting commercial stock keywords ordered by relevance.
+- First 8-10 keywords must match the key phrases and terms in your Title in order.
 - Cover visual elements (subject, composition, lighting, colors), actions, conceptual themes (business, wellness, tech), and buyer search synonyms.
-- Banned spam words: "stock", "photo", "download", "high resolution", "DSLR", "RAW", camera models, trademarks, logos.`,
+- Banned spam words: "stock", "photo", "download", "high resolution", "DSLR", "RAW", camera models, trademarks (no "zumba", "crossfit").`,
       };
     }
 
@@ -114,16 +136,19 @@ RULES:
           'Banned: Generic filler words, technical jargon, copyright/trademark terms.',
         ],
         systemPrompt: `Act as a strict Microstock SEO Metadata Engine specifically optimized for Getty Images and iStock (ESP Taxonomy).
+${GLOBAL_SEO_RESTRICTIONS}
 
 RULES:
 1. Title:
 - Sentence case only.
 - Length between 50 and ${maxTitle} characters.
 - Factual, clear, and objective describing what is visible without subjective hype words.
+- No country/nationality terms.
 
 2. Keywords:
 - Provide exactly ${totalKw} clean, unambiguous keywords aligned with Getty ESP taxonomy.
-- High emphasis on conceptual tags (mood, emotion, demographics, cultural/business concepts).
+- First 5-10 keywords must match the core words of your Title in order.
+- High emphasis on conceptual tags (mood, emotion, cultural/business concepts).
 - Do not provide redundant singular/plural duplicates.
 - Banned spam: "stock photo", "commercial use", "free", "image", "picture", "photo", trademarks.`,
       };
@@ -148,6 +173,7 @@ RULES:
           'Keywords: 28-30 keywords spanning visual elements and commercial design applications.',
         ],
         systemPrompt: `Act as a strict Microstock Metadata Engine for Magnific and Generative Art Marketplaces.
+${GLOBAL_SEO_RESTRICTIONS}
 
 RULES:
 1. Title:
@@ -157,6 +183,7 @@ RULES:
 
 2. Keywords:
 - Provide exactly ${totalKw} keywords combining aesthetic qualities (lighting, composition, art medium) with commercial themes.
+- First 5-8 keywords match title terms in order.
 - Banned spam: "stock photo", "commercial use", "free", "image", "picture", trademarks.`,
       };
     }
@@ -179,6 +206,7 @@ RULES:
           'Design Keywords: 30-35 keywords emphasizing design utility, color themes, and asset format.',
         ],
         systemPrompt: `Act as a strict Microstock SEO Metadata Engine for Vecteezy and Graphic Resource Marketplaces.
+${GLOBAL_SEO_RESTRICTIONS}
 
 RULES:
 1. Title:
@@ -188,6 +216,7 @@ RULES:
 
 2. Keywords:
 - Provide exactly ${totalKw} keywords covering graphic components, design utility, color scheme, and commercial themes.
+- First keywords match title terms in order.
 - Banned spam: "free", "download", trademarks.`,
       };
     }
@@ -210,10 +239,11 @@ RULES:
           'Keywords: 30 ranked descending keywords with core visual subject in top 5.',
         ],
         systemPrompt: `Act as a strict Microstock SEO Metadata Engine for Dreamstime.
+${GLOBAL_SEO_RESTRICTIONS}
 
 RULES:
-1. Title: Sentence case only, 60-${maxTitle} chars, [Main Subject] + [Action] + [Setting].
-2. Keywords: ${totalKw} ranked keywords in descending relevance. No spam words or trademarks.`,
+1. Title: Sentence case only, 60-${maxTitle} chars, [Main Subject] + [Action] + [Setting]. No country names.
+2. Keywords: ${totalKw} ranked keywords in descending relevance. First 5-8 keywords match title terms. No spam words or trademarks.`,
       };
     }
 
@@ -237,10 +267,11 @@ RULES:
           'Spam Banned: "stock photo", "commercial use", "free", "image", "picture", "photo", trademarks.',
         ],
         systemPrompt: `Act as a strict Universal Microstock SEO Metadata Engine compatible with Adobe Stock, Shutterstock, and Getty Images.
+${GLOBAL_SEO_RESTRICTIONS}
 
 RULES:
-1. Title: Sentence case only, 60-${maxTitle} characters. Formula: [Main Subject] + [Primary Action/Attribute] + [Setting/Concept].
-2. Keywords: Exactly ${totalKw} keywords ordered by strict descending relevance. Top 10 reflect primary commercial value. Singular base terms. No spam words or trademarks.`,
+1. Title: Sentence case only, 60-${maxTitle} characters. Formula: [Main Subject] + [Primary Action/Attribute] + [Setting/Concept]. No country/nationality names.
+2. Keywords: Exactly ${totalKw} keywords ordered by strict descending relevance. Top 10 match Title core terms in order. Singular base terms. No spam words or trademarks.`,
       };
     }
   }

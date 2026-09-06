@@ -1,5 +1,6 @@
 import { StockAsset, Marketplace, GenerationSettings } from '../types';
 import { getMarketplaceSeoProfile } from '../utils/marketplacePrompts';
+import { sanitizeTitle, alignKeywordsWithTitle } from '../utils/stockSeoSanitizer';
 
 // Fast high-fidelity thumbnail converter: 800px JPEG/PNG (~20-40KB) for instant network upload & accurate AI vision analysis
 export const fileToFastThumbnail = (file: File): Promise<string> => {
@@ -189,8 +190,26 @@ Output ONLY valid JSON matching this schema:
           continue;
         }
 
-        // If rate limited or invalid key, throw immediately
-        throw lastError;
+        // If rate limit / quota exceeded (429 or ResourceExhausted), switch to next candidate model!
+        // Free tier has separate quota pools for 2.0-flash, 1.5-flash, 2.5-flash
+        if (
+          response.status === 429 ||
+          errorMsg.toLowerCase().includes('quota') ||
+          errorMsg.toLowerCase().includes('rate') ||
+          errorMsg.toLowerCase().includes('resource_exhausted')
+        ) {
+          console.warn(`Model ${currentModel} rate limit/quota reached (${errorMsg}), waiting 3.5s and switching to fallback candidate...`);
+          await new Promise((r) => setTimeout(r, 3500));
+          continue;
+        }
+
+        // If invalid API key, throw immediately
+        if (response.status === 400 && errorMsg.toLowerCase().includes('api_key')) {
+          throw lastError;
+        }
+
+        // Otherwise try next candidate
+        continue;
       }
 
       const result = await response.json();
@@ -200,7 +219,10 @@ Output ONLY valid JSON matching this schema:
         throw new Error('Could not parse Gemini JSON response');
       }
 
-      let resTitle = (parsed.title || params.filename).trim();
+      // 1. Clean Title and eliminate any country/nationality terms or trademarks
+      let rawParsedTitle = (parsed.title || params.filename).trim();
+      let resTitle = sanitizeTitle(rawParsedTitle);
+
       if (params.titleLength > 0 && resTitle.length > params.titleLength) {
         const cut = resTitle.substring(0, params.titleLength);
         const lastSpace = cut.lastIndexOf(' ');
@@ -209,7 +231,7 @@ Output ONLY valid JSON matching this schema:
 
       let resDesc = '';
       if (params.descLength > 0 && parsed.description) {
-        resDesc = parsed.description.trim();
+        resDesc = sanitizeTitle(parsed.description.trim());
         if (resDesc.length > params.descLength) {
           const cut = resDesc.substring(0, params.descLength);
           const lastSpace = cut.lastIndexOf(' ');
@@ -218,13 +240,8 @@ Output ONLY valid JSON matching this schema:
       }
 
       let resKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-      resKeywords = resKeywords
-        .map((k: any) => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
-        .filter((k: string) => k.length > 0 && !k.includes(',') && !k.includes('"'));
-      resKeywords = Array.from(new Set(resKeywords));
-      if (params.keywordsCount > 0) {
-        resKeywords = resKeywords.slice(0, params.keywordsCount);
-      }
+      // 2. Strict Title-to-Keyword Alignment: First keywords guaranteed to match Title in exact sequential order
+      resKeywords = alignKeywordsWithTitle(resTitle, resKeywords, params.keywordsCount || 30);
 
       return {
         title: resTitle,
@@ -241,8 +258,18 @@ Output ONLY valid JSON matching this schema:
       lastError = err;
       if (err?.name === 'AbortError') {
         lastError = new Error(`Request timed out for model ${currentModel}`);
+        continue;
       }
-      if (err?.message && (err.message.includes('not found') || err.message.includes('404'))) {
+      if (
+        err?.message &&
+        (err.message.includes('not found') ||
+          err.message.includes('404') ||
+          err.message.includes('quota') ||
+          err.message.includes('rate') ||
+          err.message.includes('429'))
+      ) {
+        console.warn(`Encountered ${err.message} on ${currentModel}, trying fallback...`);
+        await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
       throw err;
@@ -316,7 +343,9 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
   const parsed = extractJson(rawText);
   if (!parsed) throw new Error('Could not parse Groq JSON response');
 
-  let resTitle = (parsed.title || params.filename).trim();
+  let rawParsedTitle = (parsed.title || params.filename).trim();
+  let resTitle = sanitizeTitle(rawParsedTitle);
+
   if (params.titleLength > 0 && resTitle.length > params.titleLength) {
     const cut = resTitle.substring(0, params.titleLength);
     const lastSpace = cut.lastIndexOf(' ');
@@ -325,7 +354,7 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
 
   let resDesc = '';
   if (params.descLength > 0 && parsed.description) {
-    resDesc = parsed.description.trim();
+    resDesc = sanitizeTitle(parsed.description.trim());
     if (resDesc.length > params.descLength) {
       const cut = resDesc.substring(0, params.descLength);
       const lastSpace = cut.lastIndexOf(' ');
@@ -334,13 +363,7 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
   }
 
   let resKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-  resKeywords = resKeywords
-    .map((k: any) => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
-    .filter((k: string) => k.length > 0 && !k.includes(',') && !k.includes('"'));
-  resKeywords = Array.from(new Set(resKeywords));
-  if (params.keywordsCount > 0) {
-    resKeywords = resKeywords.slice(0, params.keywordsCount);
-  }
+  resKeywords = alignKeywordsWithTitle(resTitle, resKeywords, params.keywordsCount || 30);
 
   return {
     title: resTitle,
@@ -498,14 +521,17 @@ export function generateClientFallbackMetadata(
     ? ''
     : `${fullTitle}. High quality microstock asset suitable for commercial design, marketing, and editorial publications.`.slice(0, maxDescLength);
 
+  const cleanedTitle = sanitizeTitle(fullTitle);
+  const alignedKeywords = alignKeywordsWithTitle(cleanedTitle, finalKeywords, targetKeywordsCount);
+
   return {
-    title: fullTitle,
-    rawTitle: fullTitle,
+    title: cleanedTitle,
+    rawTitle: cleanedTitle,
     topic: selectedCategory,
     description: fallbackDesc,
-    rawDescription: `${fullTitle}. High quality microstock asset suitable for commercial design, marketing, and editorial publications.`,
-    keywords: finalKeywords.slice(0, targetKeywordsCount),
-    rawKeywords: finalKeywords,
+    rawDescription: `${cleanedTitle}. High quality microstock asset suitable for commercial design, marketing, and editorial publications.`,
+    keywords: alignedKeywords,
+    rawKeywords: alignedKeywords,
     category: selectedCategory,
     source: 'Smart Stock Taxonomy Engine (Free Instant Web Engine)',
   };
@@ -617,7 +643,9 @@ export async function generateMetadataForAsset(
     if (res.ok) {
       const data = await res.json();
       if (data && (data.title || data.keywords)) {
-        let finalTitle = (data.title || asset.filename).trim();
+        let rawTitle = (data.title || asset.filename).trim();
+        let finalTitle = sanitizeTitle(rawTitle);
+
         if (settings.titleLength > 0 && finalTitle.length > settings.titleLength) {
           const cut = finalTitle.substring(0, settings.titleLength);
           const lastSpace = cut.lastIndexOf(' ');
@@ -626,7 +654,7 @@ export async function generateMetadataForAsset(
 
         let finalDesc = '';
         if (settings.descLength > 0 && data.description) {
-          finalDesc = data.description.trim();
+          finalDesc = sanitizeTitle(data.description.trim());
           if (finalDesc.length > settings.descLength) {
             const cut = finalDesc.substring(0, settings.descLength);
             const lastSpace = cut.lastIndexOf(' ');
@@ -634,10 +662,8 @@ export async function generateMetadataForAsset(
           }
         }
 
-        let finalKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
-        if (settings.keywordsCount > 0) {
-          finalKeywords = finalKeywords.slice(0, settings.keywordsCount);
-        }
+        let rawKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
+        let finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30);
 
         return {
           ...data,
@@ -696,6 +722,11 @@ export async function generateMetadataForAsset(
       } catch (clientDirectErr: any) {
         lastDirectError = clientDirectErr;
         console.warn(`Client direct AI call with key #${i + 1} failed:`, clientDirectErr?.message);
+        // If there's another API key to try in the pool, wait 3.5s before calling next API key
+        if (i < orderedKeys.length - 1) {
+          console.log(`API limit/error on key #${i + 1}. Waiting 3.5s before calling next API key in pool...`);
+          await new Promise((r) => setTimeout(r, 3500));
+        }
       }
     }
 

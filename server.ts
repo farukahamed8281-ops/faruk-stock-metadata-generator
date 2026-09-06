@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { getMarketplaceSeoProfile } from './src/utils/marketplacePrompts';
+import { sanitizeTitle, alignKeywordsWithTitle } from './src/utils/stockSeoSanitizer';
 
 dotenv.config();
 
@@ -719,13 +720,26 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               },
             });
           } catch (modelCallErr: any) {
-            console.warn(`Attempt with model ${targetModel} error:`, modelCallErr?.message);
+            const errStr = (modelCallErr?.message || '').toLowerCase();
+            console.warn(`Attempt with model ${targetModel} (key #${keyIdx + 1}) error:`, modelCallErr?.message);
+            const isRateLimit =
+              errStr.includes('quota') ||
+              errStr.includes('rate') ||
+              errStr.includes('429') ||
+              errStr.includes('resource_exhausted');
+
+            if (isRateLimit) {
+              console.log(`API Rate Limit hit on model ${targetModel}. Waiting 3.5s before calling next API/model...`);
+              await new Promise((r) => setTimeout(r, 3500));
+            }
           }
 
           if (response && response.text) {
             const parsed = parseAiJsonResponse(response.text);
             if (parsed && (parsed.title || parsed.keywords)) {
-              let resTitle = (parsed.title || filename).trim();
+              let rawTitle = (parsed.title || filename).trim();
+              let resTitle = sanitizeTitle(rawTitle);
+
               if (titleLength > 0 && resTitle.length > titleLength) {
                 const cut = resTitle.substring(0, titleLength);
                 const lastSpace = cut.lastIndexOf(' ');
@@ -734,7 +748,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
 
               let resDesc = '';
               if (descLength > 0 && parsed.description) {
-                resDesc = parsed.description.trim();
+                resDesc = sanitizeTitle(parsed.description.trim());
                 if (resDesc.length > descLength) {
                   const cut = resDesc.substring(0, descLength);
                   const lastSpace = cut.lastIndexOf(' ');
@@ -742,14 +756,8 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
                 }
               }
 
-              let resKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-              resKeywords = resKeywords
-                .map((k: any) => (typeof k === 'string' ? k.trim().toLowerCase() : ''))
-                .filter((k: string) => k.length > 0 && !k.includes(',') && !k.includes('"'));
-              resKeywords = Array.from(new Set(resKeywords));
-              if (keywordsCount > 0) {
-                resKeywords = resKeywords.slice(0, keywordsCount);
-              }
+              let rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+              let resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30);
 
               return res.json({
                 title: resTitle,
@@ -767,6 +775,12 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
         } catch (geminiError: any) {
           console.warn(`Gemini model ${targetModel} failed:`, geminiError?.message);
         }
+      }
+
+      // If this key didn't return a result, pause 3.5s before switching to next API key
+      if (keyIdx < keyCandidates.length - 1) {
+        console.log(`API Key #${keyIdx + 1} did not complete. Waiting 3.5s before calling Key #${keyIdx + 2}...`);
+        await new Promise((r) => setTimeout(r, 3500));
       }
     }
 
