@@ -105,9 +105,9 @@ async function generateViaDirectGemini(
   const modelCandidates = [
     chosenModel,
     'gemini-2.5-flash',
-    'gemini-3.7-flash',
     'gemini-2.0-flash',
-    'gemini-1.5-flash',
+    'gemini-3.7-flash',
+    'gemini-2.5-pro',
   ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
   const profile = getMarketplaceSeoProfile(
