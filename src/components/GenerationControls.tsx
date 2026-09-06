@@ -116,7 +116,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             value={settings.aiProvider || 'Google Gemini'}
             onChange={(e) => {
               const newProv = e.target.value;
-              const defaultM = newProv === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-3.7-flash';
+              const defaultM = newProv === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-2.5-flash';
               onUpdateSettings({ aiProvider: newProv, model: defaultM });
             }}
             className="w-full bg-[#12151b] border border-[#2d3444] rounded-lg px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-orange-500 appearance-none font-medium transition-colors cursor-pointer"
@@ -139,7 +139,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             id="ai-model-select"
             value={
               settings.model ||
-              (settings.aiProvider === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-3.7-flash')
+              (settings.aiProvider === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-2.5-flash')
             }
             onChange={(e) => onUpdateSettings({ model: e.target.value })}
             className="w-full bg-[#12151b] border border-[#2d3444] rounded-lg px-3 pr-8 py-2 text-xs text-gray-200 focus:outline-none focus:border-orange-500 appearance-none font-medium transition-colors cursor-pointer"
@@ -151,10 +151,10 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
               </>
             ) : (
               <>
-                <option value="gemini-3.7-flash">Gemini 3.7 Flash (Recommended)</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Vision)</option>
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended - Fastest & 100% Free)</option>
+                <option value="gemini-3.8-flash">Gemini 3.8 Flash (High-Accuracy Vision)</option>
+                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High Quota)</option>
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview (Deep Vision Analysis)</option>
               </>
             )}
           </select>
@@ -174,35 +174,9 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              id="batch-2x-btn"
-              onClick={() => onUpdateSettings({ batchSize: 2 })}
-              className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors cursor-pointer ${
-                settings.batchSize === 2
-                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
-                  : 'bg-[#1e2430] text-gray-400 border-[#2d3444] hover:text-gray-200'
-              }`}
-            >
-              2x
-            </button>
-            <button
-              type="button"
-              id="batch-3x-btn"
-              onClick={() => onUpdateSettings({ batchSize: 3 })}
-              className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors cursor-pointer ${
-                settings.batchSize === 3
-                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
-                  : 'bg-[#1e2430] text-gray-400 border-[#2d3444] hover:text-gray-200'
-              }`}
-            >
-              3x
-            </button>
-            <span className="bg-[#242b38] border border-[#353f52] px-2 py-0.5 rounded text-[11px] font-bold text-gray-200">
-              {settings.batchSize || 2}x
-            </span>
-          </div>
+          <span className="bg-[#242b38] border border-[#353f52] px-2 py-0.5 rounded text-[11px] font-bold text-gray-200">
+            {settings.batchSize || 2}x
+          </span>
         </div>
         <input
           type="range"

@@ -491,10 +491,10 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 
     // 2. Fallback candidate model ping
     const candidateModels = [
-      'gemini-3.7-flash',
       'gemini-2.5-flash',
-      'gemini-2.5-pro',
-      'gemini-2.0-flash'
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-3.1-pro-preview'
     ];
 
     let lastError = 'Authentication failed. Please check your API key.';
@@ -628,10 +628,10 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
 
     // All supported active Gemini models
     const allGeminiModels = [
-      'gemini-3.7-flash',
       'gemini-2.5-flash',
-      'gemini-2.5-pro',
-      'gemini-2.0-flash',
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-3.1-pro-preview',
     ];
 
     const modelsToTry: string[] = [];

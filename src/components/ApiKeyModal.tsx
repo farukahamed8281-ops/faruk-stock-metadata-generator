@@ -41,12 +41,12 @@ const PROVIDERS: ProviderConfig[] = [
     badge: '100% FREE & RECOMMENDED',
     portalName: 'Google AI Studio',
     description: "Google's official free multimodal AI for deep image vision, microstock SEO & top 1-5 keyword ranking",
-    defaultModel: 'gemini-3.7-flash',
+    defaultModel: 'gemini-2.5-flash',
     models: [
-      { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash (Best for Free Vision & SEO Ranking)', vision: true },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Balanced & Fast Free Vision)', vision: true },
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Deep Vision Analysis)', vision: true },
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Next-Gen Ultra Fast)', vision: true },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Recommended - Fastest & 100% Free)', vision: true },
+      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (High-Accuracy Multimodal Vision)', vision: true },
+      { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite (High Free RPM Quota)', vision: true },
+      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Deep Vision Analysis)', vision: true },
     ],
     supportsVision: true,
     getKeyUrl: 'https://aistudio.google.com/app/apikey',
@@ -104,7 +104,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   onClose,
   hasGeminiKey,
   activeProvider = 'Google Gemini',
-  selectedModel: initialModel = 'gemini-3.7-flash',
+  selectedModel: initialModel = 'gemini-2.5-flash',
   customApiKey = '',
   apiKeys = [],
   onSaveApiKey,
@@ -114,7 +114,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 }) => {
   const [selectedProviderId, setSelectedProviderId] = useState<string>(activeProvider || 'Google Gemini');
   const [selectedModel, setSelectedModel] = useState<string>(
-    initialModel && initialModel !== 'gemini-2.5-flash' ? initialModel : 'gemini-3.7-flash'
+    initialModel || 'gemini-2.5-flash'
   );
   
   // Helper to load stored keys

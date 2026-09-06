@@ -69,7 +69,7 @@ export default function App() {
 
     const defaultSettings: GenerationSettings = {
       aiProvider: 'Google Gemini',
-      model: 'gemini-3.7-flash',
+      model: 'gemini-2.5-flash',
       batchSize: 2, // 2-3 concurrent parallel batches (matches user request)
       rpmEnabled: false,
       rpmLimit: 15,
@@ -126,7 +126,14 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         const mergedKeys = Array.from(new Set([...(parsed.apiKeys || []), ...savedKeys]));
-        const currentModel = parsed.model || 'gemini-2.5-flash';
+        let currentModel = parsed.model || 'gemini-2.5-flash';
+        if (
+          currentModel.includes('gemini-2.5-pro') ||
+          currentModel.includes('gemini-1.5') ||
+          currentModel.includes('gemini-2.0')
+        ) {
+          currentModel = 'gemini-2.5-flash';
+        }
         if (parsed.defaultTopic === 'Architectural Blueprint') {
           parsed.defaultTopic = 'General Stock';
         }
