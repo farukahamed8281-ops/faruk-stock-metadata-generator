@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Key, Info, Sliders, FileText, ChevronDown, Sparkles, AlertCircle, Plus, X, Palette, Check, Wand2, Copy, Image as ImageIcon, Zap, ShieldCheck } from 'lucide-react';
-import { GenerationSettings } from '../types';
+import { GenerationSettings, Marketplace } from '../types';
 
 interface GenerationControlsProps {
   settings: GenerationSettings;
@@ -10,6 +10,7 @@ interface GenerationControlsProps {
   onGenerateAllPrompts?: () => void;
   isGeneratingPrompts?: boolean;
   hasAssets?: boolean;
+  selectedMarketplace?: Marketplace;
 }
 
 const PRESET_COLORS = [
@@ -19,15 +20,6 @@ const PRESET_COLORS = [
   { name: 'Blue', hex: '#3b82f6' },
   { name: 'Purple', hex: '#8b5cf6' },
   { name: 'Rose', hex: '#f43f5e' },
-];
-
-const PROMPT_PRESETS = [
-  { id: 'default', label: 'Default (Recommended)', prompt: '' },
-  {
-    id: 'custom',
-    label: 'Custom Contributor Prompt...',
-    prompt: '',
-  },
 ];
 
 const FILE_EXTENSION_OPTIONS = [
@@ -41,6 +33,17 @@ const FILE_EXTENSION_OPTIONS = [
   { value: 'mp4', label: 'mp4' },
 ];
 
+const PROMPT_PRESETS = [
+  {
+    id: 'default',
+    label: 'Default (Recommended)',
+  },
+  {
+    id: 'custom',
+    label: 'Custom Contributor Prompt...',
+  },
+];
+
 export const GenerationControls: React.FC<GenerationControlsProps> = ({
   settings,
   onUpdateSettings,
@@ -49,6 +52,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
   onGenerateAllPrompts,
   isGeneratingPrompts = false,
   hasAssets = false,
+  selectedMarketplace = 'Adobe Stock',
 }) => {
   const [newNegativeTag, setNewNegativeTag] = useState('');
   const [showColorPalette, setShowColorPalette] = useState(false);
@@ -71,13 +75,10 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
   };
 
   const handlePromptPresetChange = (presetId: string) => {
-    const selected = PROMPT_PRESETS.find((p) => p.id === presetId);
-    if (selected) {
-      onUpdateSettings({
-        customPromptPreset: selected.id,
-        customPrompt: selected.id === 'custom' ? settings.customPrompt : selected.prompt,
-      });
-    }
+    onUpdateSettings({
+      customPromptPreset: presetId,
+      customPrompt: presetId === 'custom' ? settings.customPrompt : '',
+    });
   };
 
   const activeThemeColor = settings.themeColor || '#ff5533';
@@ -322,62 +323,6 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
               className="w-full h-1.5 bg-[#2a3140] rounded-lg appearance-none cursor-pointer"
             />
           </div>
-
-          {/* Strict Stock Compliance (Zero Trademark / Brand Filter) */}
-          <div className="flex items-center justify-between text-xs p-2.5 rounded-lg bg-[#141822] border border-[#262f40]">
-            <div className="flex flex-col gap-0.5">
-              <div className="flex items-center gap-1.5 font-semibold text-gray-200">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-xs font-bold">Strict Stock Compliance</span>
-                <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 px-1 py-0.5 rounded">
-                  SAFE & ACTIVE
-                </span>
-              </div>
-              <span className="text-[10px] text-gray-400 leading-tight">
-                Filters forbidden trademarks & logos to prevent rejection.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onUpdateSettings({ strictStockCompliance: settings.strictStockCompliance === false ? true : false })}
-              className={`w-8 h-4.5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ml-2 ${
-                settings.strictStockCompliance !== false ? 'bg-emerald-600' : 'bg-[#2a303d]'
-              }`}
-            >
-              <div
-                className={`bg-white w-3.5 h-3.5 rounded-full shadow-md transform transition-transform ${
-                  settings.strictStockCompliance !== false ? 'translate-x-3.5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Adobe Stock Top-10 Ranking Algorithm Prioritizer */}
-          <div className="flex items-center justify-between text-xs p-2.5 rounded-lg bg-[#141822] border border-[#262f40]">
-            <div className="flex flex-col gap-0.5">
-              <div className="flex items-center gap-1.5 font-semibold text-gray-200">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-xs font-bold">Adobe Top-10 Weight</span>
-              </div>
-              <span className="text-[10px] text-gray-400 leading-tight">
-                Prioritizes top search tags into 1st-10th positions for ranking.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onUpdateSettings({ adobeTop10Priority: !settings.adobeTop10Priority })}
-              className={`w-8 h-4.5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ml-2 ${
-                settings.adobeTop10Priority !== false ? 'bg-orange-600' : 'bg-[#2a303d]'
-              }`}
-              style={{ backgroundColor: settings.adobeTop10Priority !== false ? activeThemeColor : undefined }}
-            >
-              <div
-                className={`bg-white w-3.5 h-3.5 rounded-full shadow-md transform transition-transform ${
-                  settings.adobeTop10Priority !== false ? 'translate-x-3.5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
         </div>
       ) : (
         /* Prompt Tab Content */
@@ -496,24 +441,6 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-gray-300">Custom Contributor Instructions</label>
               <span className="text-[10px] text-gray-500 font-mono">Optional</span>
-            </div>
-            
-            {/* Quick Preset Buttons */}
-            <div className="flex flex-wrap gap-1 mb-1">
-              {PROMPT_PRESETS.filter(p => p.id !== 'default').map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => handlePromptPresetChange(preset.id)}
-                  className={`text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer ${
-                    settings.customPromptPreset === preset.id
-                      ? 'bg-orange-950/60 text-orange-300 border border-orange-700/50'
-                      : 'bg-[#202531] hover:bg-[#2a3242] text-gray-300'
-                  }`}
-                >
-                  {preset.label.split('&')[0]}
-                </button>
-              ))}
             </div>
 
             <textarea
@@ -780,7 +707,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
           </div>
         )}
 
-        {/* Custom Prompt (directly under Advance Title as in screenshot) */}
+        {/* Custom Prompt */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-gray-300">Custom Prompt</label>
           <div className="relative">
@@ -798,14 +725,13 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3 pointer-events-none" />
           </div>
 
-          {/* Quick prompt preview or custom text area if custom prompt is chosen */}
           {settings.customPromptPreset === 'custom' && (
             <textarea
-              rows={2}
+              rows={3}
               value={settings.customPrompt}
               onChange={(e) => onUpdateSettings({ customPrompt: e.target.value })}
               placeholder="Enter custom prompt instructions for AI stock tagger..."
-              className="w-full mt-1 bg-[#12151b] border border-[#2d3444] rounded-lg p-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-orange-500 resize-none font-sans"
+              className="w-full mt-1 bg-[#12151b] border border-[#2d3444] rounded-lg p-2.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-orange-500 resize-none font-sans"
             />
           )}
         </div>

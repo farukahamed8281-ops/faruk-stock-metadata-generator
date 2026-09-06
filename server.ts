@@ -5,6 +5,7 @@ import fs from 'fs';
 import JSZip from 'jszip';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import { getMarketplaceSeoProfile } from './src/utils/marketplacePrompts';
 
 dotenv.config();
 
@@ -656,45 +657,24 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
 
       for (const targetModel of modelsToTry) {
         try {
+          const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
+
           const promptText = `
-You are an expert Microstock Photography & Vector Inspector analyzing an uploaded asset for Adobe Stock, Shutterstock, Magnific, and Getty Images.
+${profile.systemPrompt}
 
-INSPECTION TASK (100% VISUAL ACCURACY MANDATE):
-Look directly at the provided image/asset and describe PRECISELY what is visible with ZERO guesswork or false assumptions.
-DO NOT rely on meaningless filenames like "mmm (19)". Inspect the actual visual objects, person, device, background, style, and colors!
+TASK (100% VISUAL ACCURACY MANDATE):
+Look directly at the provided image/asset and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions.
+DO NOT rely on meaningless filenames like "${filename}" or camera numbers like "121 (46).jpg". Inspect the actual visual objects, person, device, background, style, and colors!
 
-Asset Information:
-- Filename: ${filename}
-- Target Platform: ${marketplace}
-- User Category Hint: ${category}
-- Maximum Title Length: ${titleLength} characters
-- Maximum Description Length: ${descLength} characters ${descLength === 0 ? '(Strictly EMPTY string "" since length is 0)' : ''}
-- Required Keywords Count: Exactly ${keywordsCount} keywords
-${advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The user has specified this is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include "transparent background", "isolated", "png", "cut out". DO NOT say black or dark background.' : ''}
-${advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The user has specified this is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
+ADDITIONAL ASSET PARAMETERS:
+${advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include "transparent background", "isolated", "png", "cut out".' : ''}
+${advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
 ${advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
-${customPrompt ? `- Contributor Notes: ${customPrompt}` : ''}
+- Description: ${descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : `Concise commercial description under ${descLength} characters.`}
+- Category & Topic: Provide the single best microstock category and subject topic name.
 
-STRICT STOCK COMPLIANCE & SEO RULES:
-1. WHAT IS VISIBLE (Subject Truth):
-   - Identify the actual physical objects, device, hands, people, art style (e.g. 3D render, watercolor, vector illustration, macro photo, isolated studio shot, blank smartphone screen mockup).
-   - If isolated on white/transparent/black background, mention "isolated".
-   - Do NOT invent elements that are not in the image.
-
-2. TITLE (Buyer Search SEO):
-   - First 3-4 words must describe the PRIMARY subject (e.g. "Hand holding smartphone mockup blank screen", "Vintage floral seamless pattern").
-   - Maximum ${titleLength} characters, clean, commercial, and professional.
-
-3. KEYWORDS RANKING (#1 to #${keywordsCount}):
-   - Positions #1 to #5: EXACT subject, main object, dominant color, art style, background type.
-   - Positions #6 to #12: Materials, actions, specific adjectives, composition details.
-   - Positions #13 to #${keywordsCount}: Themes, concepts, emotions, commercial usage tags.
-   - NEVER include brand names (Apple, iPhone, Nike, etc.), trademarked words, or generic spam.
-   - Output exactly ${keywordsCount} unique, comma-separated keywords.
-
-4. CATEGORY & TOPIC:
-   - Provide the single best microstock category and subject topic name.
+${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${customPrompt.trim()}` : ''}
 `;
 
           const promptParts: any[] = [];

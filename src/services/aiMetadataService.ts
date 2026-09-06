@@ -1,4 +1,5 @@
 import { StockAsset, Marketplace, GenerationSettings } from '../types';
+import { getMarketplaceSeoProfile } from '../utils/marketplacePrompts';
 
 // Fast high-fidelity thumbnail converter: 800px JPEG/PNG (~20-40KB) for instant network upload & accurate AI vision analysis
 export const fileToFastThumbnail = (file: File): Promise<string> => {
@@ -108,39 +109,27 @@ async function generateViaDirectGemini(
     'gemini-1.5-flash',
   ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
-  const promptText = `You are a world-class Microstock Photography & Vector Inspector analyzing an uploaded asset for ${params.marketplace} (Adobe Stock, Shutterstock, Getty Images).
+  const profile = getMarketplaceSeoProfile(
+    params.marketplace,
+    params.titleLength,
+    params.keywordsCount
+  );
 
-VISUAL ANALYSIS MANDATE:
-Carefully inspect the visual image attached. Accurately describe what is VISIBLY depicted in the image.
-Do NOT rely on meaningless filenames (such as "${params.filename}" or camera numbers like "121 (46).jpg").
-Identify the visible subject, people, objects, animals, environment, lighting, background, actions, colors, composition, and art style.
+  const promptText = `${profile.systemPrompt}
 
-REQUIREMENTS:
-1. TITLE:
-   - Descriptive commercial stock title (5 to 15 words) accurately depicting the visual scene.
-   - First 3-4 words must identify the primary subject.
-   - Maximum ${params.titleLength} characters.
-   - Strictly NO brand names, trademarks, or copyrighted terms.
-   ${params.advanceIsolatedTransparent ? '- MUST end with "isolated on transparent background".' : ''}
-   ${params.advanceIsolatedWhite ? '- MUST end with "isolated on white background".' : ''}
-   ${params.advanceVector ? '- MUST include "Vector" in title.' : ''}
-   ${params.advanceIllustration ? '- MUST include "Illustration" in title.' : ''}
+TASK (100% VISUAL ACCURACY MANDATE):
+Look directly at the provided image/asset and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions.
+DO NOT rely on meaningless filenames like "${params.filename}" or camera numbers like "121 (46).jpg". Inspect the actual visual objects, person, device, background, style, and colors!
 
-2. KEYWORDS:
-   - Exactly ${params.keywordsCount} ranked, high-converting commercial stock keywords.
-   - Ordered strictly by search relevance:
-     * Keywords 1-5: Primary subject, main object, dominant color, art style.
-     * Keywords 6-15: Actions, materials, setting, lighting, composition, mood.
-     * Keywords 16-${params.keywordsCount}: Conceptual themes, commercial applications, synonyms.
-   - Lowercase, comma-separated, no punctuation, no duplicates, no brand names.
+ADDITIONAL ASSET PARAMETERS:
+${params.advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include "transparent background", "isolated", "png", "cut out".' : ''}
+${params.advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
+${params.advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
+${params.advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
+- Description: ${params.descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : `Concise commercial description under ${params.descLength} characters.`}
+- Category & Topic: Identify the best fitting microstock category and subject topic.
 
-3. DESCRIPTION:
-   - 1-2 sentence commercial microstock description (max ${params.descLength} characters).
-
-4. CATEGORY & TOPIC:
-   - Identify the best fitting microstock category and subject topic.
-
-${params.customPrompt ? `Contributor Notes: ${params.customPrompt}` : ''}
+${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${params.customPrompt.trim()}` : ''}
 
 Output ONLY valid JSON matching this schema:
 {
@@ -281,6 +270,12 @@ async function generateViaDirectGroq(
   const targetModel = model || 'llama-3.2-11b-vision-preview';
   const url = 'https://api.groq.com/openai/v1/chat/completions';
 
+  const profile = getMarketplaceSeoProfile(
+    params.marketplace,
+    params.titleLength,
+    params.keywordsCount
+  );
+
   const userContent: any[] = [];
   if (params.imageData && params.imageData.includes('base64')) {
     userContent.push({
@@ -290,7 +285,10 @@ async function generateViaDirectGroq(
   }
   userContent.push({
     type: 'text',
-    text: `Generate stock metadata for this image for ${params.marketplace}. Title max ${params.titleLength} chars. Exactly ${params.keywordsCount} ranked keywords. Output ONLY JSON: {"title": "", "topic": "", "description": "", "keywords": ["..."], "category": ""}`,
+    text: `${profile.systemPrompt}
+TASK: Inspect the image carefully and output metadata optimized for ${params.marketplace}.
+${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL INSTRUCTIONS:\n${params.customPrompt.trim()}\n` : ''}
+Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "description": "...", "keywords": ["..."], "category": "..."}`,
   });
 
   const response = await fetch(url, {

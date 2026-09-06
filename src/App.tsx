@@ -16,6 +16,7 @@ import {
 } from './types';
 import { exportAssetsToCsv } from './utils/csvExporter';
 import { exportAssetsToZip } from './utils/zipExporter';
+import { getMarketplaceSeoProfile } from './utils/marketplacePrompts';
 import { generateMetadataForAsset, fileToFastThumbnail } from './services/aiMetadataService';
 
 // Helper: Fast lightweight thumbnail conversion for AI vision (400px @ 0.70 JPEG = ~12-18KB, uploads & processes in milliseconds)
@@ -93,11 +94,23 @@ export default function App() {
       advanceIllustration: false,
       advancePrefixEnabled: false,
       advanceSuffixEnabled: false,
-      titleCaseStyle: 'default',
+      titleCaseStyle: 'sentenceCase',
       fileExtension: 'Default',
       themeColor: '#ff5533',
       strictStockCompliance: true,
-      negativeKeywords: ['watermark', 'copyright', 'vector logo'],
+      adobeTop10Priority: true,
+      negativeKeywords: [
+        'watermark',
+        'copyright',
+        'vector logo',
+        'stock photo',
+        'commercial use',
+        'free photo',
+        'free',
+        'image',
+        'picture',
+        'photo',
+      ],
       activeTab: 'metadata',
       targetPromptGenerator: 'midjourney',
       promptDetailLevel: 'standard',
@@ -259,9 +272,12 @@ export default function App() {
       title = `${title} ${suffix.trim()}`;
     }
 
+    // Clean any accidental (Chars: XX) tags from AI output
+    title = title.replace(/\s*\(\s*Chars?:\s*\d+\s*\)/gi, '').trim();
+
     if (activeSettings.titleCaseStyle === 'titleCase') {
       title = title.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.substring(1).toLowerCase());
-    } else if (activeSettings.titleCaseStyle === 'sentenceCase') {
+    } else if (activeSettings.titleCaseStyle === 'sentenceCase' || activeSettings.titleCaseStyle === 'default') {
       title = title.charAt(0).toUpperCase() + title.substring(1).toLowerCase();
     } else if (activeSettings.titleCaseStyle === 'upperCase') {
       title = title.toUpperCase();
@@ -397,26 +413,14 @@ export default function App() {
   // Adjust default settings when marketplace changes
   const handleSelectMarketplace = (m: Marketplace) => {
     setSelectedMarketplace(m);
-    if (m === 'Adobe Stock') {
-      setSettings((prev) => ({
-        ...prev,
-        titleLength: 76,
-        keywordsCount: 30,
-      }));
-    } else if (m === 'Shutterstock') {
-      setSettings((prev) => ({
-        ...prev,
-        titleLength: 100,
-        keywordsCount: 45,
-      }));
-    } else if (m === 'Magnific') {
-      setSettings((prev) => ({
-        ...prev,
-        titleLength: 70,
-        keywordsCount: 30,
-      }));
-    }
-    addToast('info', `Switched to ${m}`, `Settings adjusted for ${m} requirements.`);
+    const profile = getMarketplaceSeoProfile(m);
+    setSettings((prev) => ({
+      ...prev,
+      titleLength: profile.recommendedTitleLength,
+      keywordsCount: profile.recommendedKeywordsCount,
+      titleCaseStyle: 'sentenceCase',
+    }));
+    addToast('info', `${profile.engineName} Activated`, `${profile.badge} — Auto-tuned for highest ranking.`);
   };
 
   // Load sample assets
@@ -873,6 +877,7 @@ export default function App() {
               onGenerateAllPrompts={handleGenerateAllPrompts}
               isGeneratingPrompts={isGeneratingPrompts}
               hasAssets={assets.length > 0}
+              selectedMarketplace={selectedMarketplace}
             />
           </div>
 
