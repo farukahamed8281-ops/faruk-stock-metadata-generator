@@ -41,6 +41,10 @@ CRITICAL UNIVERSAL MICROSTOCK SEO MANDATES:
   * Use "digital tablet" (NOT "ipad")
   * Use "laptop computer" (NOT "macbook")
   * Use "sportswear" or "activewear" (NOT "nike", "adidas", "lululemon")
+
+4. TITLE PUNCTUATION (MANDATORY FULL STOP):
+- ALWAYS end the generated Title with a single full stop (.) period. Never end with a comma, hyphen, colon, or no punctuation!
+- Example: "Happy woman enjoying dance fitness workout in group aerobics class."
 `;
 
 export function getMarketplaceSeoProfile(

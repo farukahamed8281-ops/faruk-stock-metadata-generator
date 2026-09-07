@@ -103,6 +103,12 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
       title = `${title} ${suffixText.trim()}`;
     }
 
+    // Ensure title ends with a single full stop (.)
+    title = title.replace(/[.,;:!?\s]+$/, '').trim();
+    if (title.length > 0) {
+      title = `${title}.`;
+    }
+
     return title.trim();
   };
 
@@ -128,8 +134,16 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
       .map((k) => k.trim())
       .filter(Boolean);
 
+    let savedTitle = (editTitle || '').trim();
+    if (savedTitle.length > 0) {
+      savedTitle = savedTitle.replace(/[.,;:!?\s]+$/, '').trim();
+      if (savedTitle.length > 0) {
+        savedTitle = `${savedTitle}.`;
+      }
+    }
+
     onUpdateAsset(asset.id, {
-      title: editTitle,
+      title: savedTitle,
       topic: editTopic,
       description: editDesc,
       keywords: parsedKeywords,

@@ -745,6 +745,10 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
                 const lastSpace = cut.lastIndexOf(' ');
                 resTitle = (lastSpace > titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
               }
+              resTitle = resTitle.replace(/[.,;:!?\s]+$/, '').trim();
+              if (resTitle.length > 0) {
+                resTitle = `${resTitle}.`;
+              }
 
               let resDesc = '';
               if (descLength > 0 && parsed.description) {

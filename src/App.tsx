@@ -329,6 +329,12 @@ export default function App() {
       title = (lastSpace > maxTitleLen * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
     }
 
+    // Always ensure title ends with a single full stop (.)
+    title = title.replace(/[.,;:!?\s]+$/, '').trim();
+    if (title.length > 0) {
+      title = `${title}.`;
+    }
+
     return title.trim();
   };
 

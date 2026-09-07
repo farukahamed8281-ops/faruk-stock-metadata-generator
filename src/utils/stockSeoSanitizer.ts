@@ -235,9 +235,13 @@ export function sanitizeTitle(title: string): string {
   // Normalize multiple spaces and fix punctuation
   cleaned = cleaned.replace(/\s+/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim();
 
-  // Ensure first letter is capitalized (Sentence case)
+  // Strip trailing punctuation before finalizing
+  cleaned = cleaned.replace(/[.,;:!?\s]+$/, '').trim();
+
+  // Ensure first letter is capitalized (Sentence case) and title ends with a full stop (.)
   if (cleaned.length > 0) {
     cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    cleaned = `${cleaned}.`;
   }
 
   return cleaned;

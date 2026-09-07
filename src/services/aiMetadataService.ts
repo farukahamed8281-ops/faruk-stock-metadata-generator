@@ -228,6 +228,10 @@ Output ONLY valid JSON matching this schema:
         const lastSpace = cut.lastIndexOf(' ');
         resTitle = (lastSpace > params.titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
       }
+      resTitle = resTitle.replace(/[.,;:!?\s]+$/, '').trim();
+      if (resTitle.length > 0) {
+        resTitle = `${resTitle}.`;
+      }
 
       let resDesc = '';
       if (params.descLength > 0 && parsed.description) {
@@ -350,6 +354,10 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
     const cut = resTitle.substring(0, params.titleLength);
     const lastSpace = cut.lastIndexOf(' ');
     resTitle = (lastSpace > params.titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+  }
+  resTitle = resTitle.replace(/[.,;:!?\s]+$/, '').trim();
+  if (resTitle.length > 0) {
+    resTitle = `${resTitle}.`;
   }
 
   let resDesc = '';
@@ -650,6 +658,10 @@ export async function generateMetadataForAsset(
           const cut = finalTitle.substring(0, settings.titleLength);
           const lastSpace = cut.lastIndexOf(' ');
           finalTitle = (lastSpace > settings.titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+        }
+        finalTitle = finalTitle.replace(/[.,;:!?\s]+$/, '').trim();
+        if (finalTitle.length > 0) {
+          finalTitle = `${finalTitle}.`;
         }
 
         let finalDesc = '';
