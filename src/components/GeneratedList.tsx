@@ -17,11 +17,13 @@ interface GeneratedListProps {
   onRegenerateAsset: (id: string) => void;
   onRegenerateAll?: () => void;
   onDownloadZip?: () => void;
+  onDownloadSingle?: (id: string) => void;
   onCopyText: (text: string, label: string) => void;
   onExportCsv: () => void;
   onGeneratePrompt?: (id: string) => void;
   selectedMarketplace: Marketplace;
   isGenerating?: boolean;
+  authorName?: string;
 }
 
 export const GeneratedList: React.FC<GeneratedListProps> = ({
@@ -31,11 +33,13 @@ export const GeneratedList: React.FC<GeneratedListProps> = ({
   onRegenerateAsset,
   onRegenerateAll,
   onDownloadZip,
+  onDownloadSingle,
   onCopyText,
   onExportCsv,
   onGeneratePrompt,
   selectedMarketplace,
   isGenerating = false,
+  authorName,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -132,8 +136,10 @@ export const GeneratedList: React.FC<GeneratedListProps> = ({
               onUpdateAsset={onUpdateAsset}
               onDeleteAsset={onDeleteAsset}
               onRegenerateAsset={onRegenerateAsset}
+              onDownloadSingle={onDownloadSingle}
               onCopyText={onCopyText}
               onGeneratePrompt={onGeneratePrompt}
+              defaultAuthor={authorName}
             />
           ))}
 

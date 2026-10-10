@@ -49,9 +49,9 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
               No generation history recorded yet. Completed batches will appear here.
             </div>
           ) : (
-            history.map((record) => (
+            history.map((record, index) => (
               <div
-                key={record.id}
+                key={`${record.id || 'batch'}-${index}`}
                 className="bg-[#12151b] border border-[#282f3d] rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 hover:border-[#384255] transition-all"
               >
                 <div className="flex flex-col gap-1">

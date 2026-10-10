@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Key, Info, Sliders, FileText, ChevronDown, Sparkles, AlertCircle, Plus, X, Palette, Check, Wand2, Copy, Image as ImageIcon, Zap, ShieldCheck } from 'lucide-react';
+import { Key, Info, Sliders, FileText, ChevronDown, Sparkles, AlertCircle, Plus, X, Palette, Check, Wand2, Copy, Image as ImageIcon, Zap, ShieldCheck, User, UserCheck } from 'lucide-react';
 import { GenerationSettings, Marketplace } from '../types';
 
 interface GenerationControlsProps {
@@ -275,6 +275,35 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
       {/* Tab Content */}
       {settings.activeTab === 'metadata' ? (
         <div className="flex flex-col gap-3.5">
+          {/* Contributor / Author Display Name Setting */}
+          <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-[#141720] border border-[#272e3d]">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+                <UserCheck className="w-3.5 h-3.5 text-orange-400" />
+                <span>Contributor / Author Name</span>
+              </label>
+              {settings.authorName?.trim() ? (
+                <span className="text-[10px] text-emerald-400 font-mono font-semibold bg-emerald-950/60 border border-emerald-700/40 px-1.5 py-0.5 rounded">
+                  Active
+                </span>
+              ) : (
+                <span className="text-[10px] text-gray-400 font-mono bg-[#1c222c] px-1.5 py-0.5 rounded">
+                  Blank (Empty)
+                </span>
+              )}
+            </div>
+            <input
+              type="text"
+              value={settings.authorName || ''}
+              onChange={(e) => onUpdateSettings({ authorName: e.target.value })}
+              placeholder="e.g. Faruk Ahamed (or leave blank for empty)"
+              className="w-full bg-[#101217] border border-[#2d3444] rounded-md px-2.5 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors"
+            />
+            <p className="text-[10px] text-gray-400 leading-normal">
+              Sets your Contributor Account or Display Name in Image EXIF (Artist), IPTC (By-line), and XMP (Creator). If left blank, it stays 100% empty.
+            </p>
+          </div>
+
           {/* Title Length Slider */}
           <div className="flex flex-col gap-1.5 pt-0.5">
             <div className="flex items-center justify-between text-xs">

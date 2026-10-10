@@ -75,13 +75,15 @@ export interface EmbedMetadataParams {
   description: string;
   keywords: string[];
   rating?: number; // default 5 (5 stars)
+  author?: string; // Optional: completely blank by default
+  software?: string; // Optional: completely blank by default
 }
 
 /**
  * Creates Adobe XMP XML packet
  */
 export function createXmpPacket(params: EmbedMetadataParams): string {
-  const { title, topic, category, description, keywords, rating = 5 } = params;
+  const { title, topic, category, description, keywords, rating = 5, author, software } = params;
   const safeTopic = topic || category || 'General Stock';
 
   return `<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -110,9 +112,10 @@ export function createXmpPacket(params: EmbedMetadataParams): string {
       <xmp:Rating>${rating}</xmp:Rating>
       <photoshop:Headline>${escapeXml(title)}</photoshop:Headline>
       <photoshop:Category>${escapeXml(safeTopic)}</photoshop:Category>
-      <photoshop:Credit>FarukStock</photoshop:Credit>
-      <photoshop:Source>FarukStock SEO</photoshop:Source>
-      <photoshop:CaptionWriter>FarukStock Contributor</photoshop:CaptionWriter>
+      ${author ? `<dc:creator><rdf:Seq><rdf:li>${escapeXml(author)}</rdf:li></rdf:Seq></dc:creator>
+      <photoshop:CaptionWriter>${escapeXml(author)}</photoshop:CaptionWriter>
+      <photoshop:Credit>${escapeXml(author)}</photoshop:Credit>` : ''}
+      ${software ? `<xmp:CreatorTool>${escapeXml(software)}</xmp:CreatorTool>` : ''}
       <Iptc4xmpCore:SubjectCode>${escapeXml(safeTopic)}</Iptc4xmpCore:SubjectCode>
     </rdf:Description>
   </rdf:RDF>
@@ -124,14 +127,12 @@ export function createXmpPacket(params: EmbedMetadataParams): string {
  * Creates Little-Endian EXIF APP1 payload with Windows XP Properties (Title, Subject, Rating, Tags, Comments)
  */
 export function createExifApp1Segment(params: EmbedMetadataParams): Uint8Array {
-  const { title, topic, description, keywords, rating = 5 } = params;
+  const { title, topic, description, keywords, rating = 5, author, software } = params;
   const safeTopic = topic || 'Stock Topic';
   const tagsList = (keywords || []).join('; ');
 
   // Value buffers
   const descBytes = stringToAscii(description || title, true);
-  const artistBytes = stringToAscii('FarukStock Contributor', true);
-  const softwareBytes = stringToAscii('FarukStock AI SEO Studio', true);
   const xpTitleBytes = stringToUtf16LE(title || '', true);
   const xpSubjectBytes = stringToUtf16LE(safeTopic, true);
   const xpCommentBytes = stringToUtf16LE(description || title, true);
@@ -157,23 +158,29 @@ export function createExifApp1Segment(params: EmbedMetadataParams): Uint8Array {
     extraData: descBytes,
   });
 
-  // 0x0131 Software (ASCII)
-  entries.push({
-    tag: 0x0131,
-    type: 2,
-    count: softwareBytes.length,
-    valueOrOffset: 0,
-    extraData: softwareBytes,
-  });
+  // 0x0131 Software (ASCII) - Only if explicitly provided; left completely blank by default
+  if (software && software.trim().length > 0) {
+    const softwareBytes = stringToAscii(software.trim(), true);
+    entries.push({
+      tag: 0x0131,
+      type: 2,
+      count: softwareBytes.length,
+      valueOrOffset: 0,
+      extraData: softwareBytes,
+    });
+  }
 
-  // 0x013B Artist (ASCII)
-  entries.push({
-    tag: 0x013b,
-    type: 2,
-    count: artistBytes.length,
-    valueOrOffset: 0,
-    extraData: artistBytes,
-  });
+  // 0x013B Artist / Authors (ASCII) - Only if explicitly provided; left completely blank by default
+  if (author && author.trim().length > 0) {
+    const artistBytes = stringToAscii(author.trim(), true);
+    entries.push({
+      tag: 0x013b,
+      type: 2,
+      count: artistBytes.length,
+      valueOrOffset: 0,
+      extraData: artistBytes,
+    });
+  }
 
   // 0x4746 Rating (SHORT: 5)
   entries.push({
@@ -356,7 +363,7 @@ export function createXmpApp1Segment(params: EmbedMetadataParams): Uint8Array {
  * Creates IPTC APP13 segment for JPEG
  */
 export function createIptcApp13Segment(params: EmbedMetadataParams): Uint8Array {
-  const { title, topic, description, keywords } = params;
+  const { title, topic, description, keywords, author } = params;
   const safeTopic = topic || 'Stock Topic';
 
   // Build IPTC IIM records
@@ -383,6 +390,12 @@ export function createIptcApp13Segment(params: EmbedMetadataParams): Uint8Array 
   addRecord(2, 20, safeTopic);
   // 2:25 Keywords (each keyword)
   keywords.forEach((k) => addRecord(2, 25, k));
+  // 2:80 By-line (Author / Contributor Name)
+  if (author && author.trim().length > 0) {
+    addRecord(2, 80, author.trim());
+    // 2:110 Credit
+    addRecord(2, 110, author.trim());
+  }
   // 2:105 Headline
   addRecord(2, 105, title);
   // 2:120 Caption-Abstract
@@ -586,12 +599,19 @@ export function embedMetadataInPng(
     createTextChunk('Title', title),
     createTextChunk('Subject', safeTopic),
     createTextChunk('Topic', safeTopic),
-    createTextChunk('Author', 'FarukStock Contributor'),
     createTextChunk('Description', description || title),
     createTextChunk('Comment', description || title),
     createTextChunk('Keywords', (keywords || []).join(', ')),
-    xmpChunk,
   ];
+
+  if (metadata.author && metadata.author.trim().length > 0) {
+    chunksToAdd.push(createTextChunk('Author', metadata.author.trim()));
+  }
+  if (metadata.software && metadata.software.trim().length > 0) {
+    chunksToAdd.push(createTextChunk('Software', metadata.software.trim()));
+  }
+
+  chunksToAdd.push(xmpChunk);
 
   // Find IHDR chunk (starts at offset 8, 8 bytes sig + 4 len + 4 type + 13 data + 4 crc = 33)
   const ihdrEnd = 8 + 4 + 4 + 13 + 4;
@@ -622,7 +642,7 @@ export async function injectMetadataIntoFile(
   fileOrBlob: Blob,
   filename: string,
   metadata: EmbedMetadataParams
-): Promise<{ blob: Blob; buffer: Uint8Array }> {
+): Promise<{ blob: Blob; buffer: Uint8Array; mimeType: string }> {
   const arrayBuffer = await fileOrBlob.arrayBuffer();
   const rawBytes = new Uint8Array(arrayBuffer);
   const lowerName = filename.toLowerCase();
@@ -638,5 +658,25 @@ export async function injectMetadataIntoFile(
   const mimeType = lowerName.endsWith('.png') ? 'image/png' : 'image/jpeg';
   const newBlob = new Blob([processedBytes], { type: mimeType });
 
-  return { blob: newBlob, buffer: processedBytes };
+  return { blob: newBlob, buffer: processedBytes, mimeType };
 }
+
+/**
+ * Downloads a single image file with lossless EXIF, IPTC, XMP and optional Contributor Author metadata
+ */
+export async function downloadSingleAssetWithMetadata(
+  fileOrBlob: Blob,
+  filename: string,
+  metadata: EmbedMetadataParams
+): Promise<void> {
+  const { blob } = await injectMetadataIntoFile(fileOrBlob, filename, metadata);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+

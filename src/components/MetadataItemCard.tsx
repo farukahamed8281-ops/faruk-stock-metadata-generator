@@ -13,6 +13,9 @@ import {
   Sparkles,
   Wand2,
   Zap,
+  Download,
+  UserCheck,
+  User,
 } from 'lucide-react';
 import { StockAsset } from '../types';
 import { generateRenamedFilename } from '../utils/zipExporter';
@@ -24,6 +27,8 @@ interface MetadataItemCardProps {
   onRegenerateAsset: (id: string) => void;
   onCopyText: (text: string, label: string) => void;
   onGeneratePrompt?: (id: string) => void;
+  onDownloadSingle?: (id: string) => void;
+  defaultAuthor?: string;
 }
 
 export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
@@ -33,6 +38,8 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   onRegenerateAsset,
   onCopyText,
   onGeneratePrompt,
+  onDownloadSingle,
+  defaultAuthor,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [showAdvanceToggles, setShowAdvanceToggles] = useState(false);
@@ -40,6 +47,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   const [selectedPromptEngine, setSelectedPromptEngine] = useState<'gemini' | 'flow' | 'midjourney' | 'flux' | 'dalle'>('gemini');
   const [editTitle, setEditTitle] = useState(asset.title);
   const [editTopic, setEditTopic] = useState(asset.topic || asset.category || '');
+  const [editAuthor, setEditAuthor] = useState(asset.author ?? defaultAuthor ?? '');
   const [editDesc, setEditDesc] = useState(asset.description);
   const [editKeywords, setEditKeywords] = useState((asset.keywords || []).join(', '));
   const [editImagePrompt, setEditImagePrompt] = useState(asset.imagePrompt || asset.midjourneyPrompt || '');
@@ -148,6 +156,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
       description: editDesc,
       keywords: parsedKeywords,
       imagePrompt: editImagePrompt,
+      author: editAuthor.trim() || undefined,
     });
     setIsEditing(false);
   };
@@ -155,6 +164,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   const handleCancelEdit = () => {
     setEditTitle(asset.title);
     setEditTopic(asset.topic || asset.category || '');
+    setEditAuthor(asset.author ?? defaultAuthor ?? '');
     setEditDesc(asset.description);
     setEditKeywords((asset.keywords || []).join(', '));
     setEditImagePrompt(asset.imagePrompt || asset.midjourneyPrompt || '');
@@ -237,6 +247,16 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {onDownloadSingle && (asset.title || asset.status === 'completed') && (
+              <button
+                type="button"
+                onClick={() => onDownloadSingle(asset.id)}
+                className="text-gray-400 hover:text-emerald-400 p-1.5 rounded hover:bg-[#252c3b] transition-colors cursor-pointer"
+                title="Download this image with embedded EXIF & Author metadata"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowAdvanceToggles(!showAdvanceToggles)}
@@ -380,6 +400,19 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
               />
             </div>
             <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-gray-400">Contributor / Author Name</label>
+                <span className="text-[10px] text-gray-500">EXIF Artist & IPTC By-line</span>
+              </div>
+              <input
+                type="text"
+                value={editAuthor}
+                onChange={(e) => setEditAuthor(e.target.value)}
+                placeholder="e.g. Your Contributor Name (leave blank for empty)"
+                className="w-full bg-[#12151c] border border-[#2d3546] rounded-md px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-orange-500"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
               <label className="text-[11px] font-semibold text-gray-400">Description</label>
               <textarea
                 rows={2}
@@ -453,8 +486,8 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
               </div>
             </div>
 
-            {/* Topic / Subject (Windows Details & IPTC Category) */}
-            <div className="flex flex-col mb-2 bg-[#141720] border border-[#252d3c] rounded-lg p-2">
+            {/* Topic / Subject & Author (Windows Details & IPTC Category) */}
+            <div className="flex flex-col mb-2 bg-[#141720] border border-[#252d3c] rounded-lg p-2 gap-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] text-gray-400 font-medium flex items-center gap-1">
                   <span>Topic / Subject:</span>
@@ -475,6 +508,20 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Author / Contributor row if active */}
+              {(asset.author || defaultAuthor) && (
+                <div className="flex items-center justify-between pt-1 border-t border-[#1e2430] text-[11px]">
+                  <span className="text-gray-400 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Contributor / Author:</span>
+                    <span className="text-emerald-400 font-semibold">{asset.author || defaultAuthor}</span>
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-mono">
+                    EXIF Artist & IPTC By-line
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Description */}

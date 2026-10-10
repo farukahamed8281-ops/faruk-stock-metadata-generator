@@ -15,7 +15,8 @@ import {
   BatchHistoryRecord,
 } from './types';
 import { exportAssetsToCsv } from './utils/csvExporter';
-import { exportAssetsToZip } from './utils/zipExporter';
+import { exportAssetsToZip, generateRenamedFilename } from './utils/zipExporter';
+import { downloadSingleAssetWithMetadata } from './utils/metadataEmbedder';
 import { getMarketplaceSeoProfile } from './utils/marketplacePrompts';
 import { generateMetadataForAsset, fileToFastThumbnail } from './services/aiMetadataService';
 import { sanitizeTitle, alignKeywordsWithTitle } from './utils/stockSeoSanitizer';
@@ -51,6 +52,8 @@ const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 2,
 export default function App() {
   // State: Assets in working batch
   const [assets, setAssets] = useState<StockAsset[]>([]);
+  const assetsRef = useRef<StockAsset[]>([]);
+  assetsRef.current = assets;
 
   // State: Target marketplace
   const [selectedMarketplace, setSelectedMarketplace] =
@@ -77,6 +80,7 @@ export default function App() {
       autoRenameFiles: false,
       autoRenameFilesToTitle: true,
       autoEmbedExifMetadata: true,
+      authorName: '',
       includeTimestampInRename: false,
       defaultTopic: 'General Stock',
       saveJpegInFolder: false,
@@ -201,11 +205,21 @@ export default function App() {
   // State: Server health
   const [hasGeminiKey, setHasGeminiKey] = useState(true);
 
-  // State: History & Modals
+  // State: History & Modals (with strict ID deduplication)
   const [history, setHistory] = useState<BatchHistoryRecord[]>(() => {
     try {
       const saved = localStorage.getItem('farruk_robi_history');
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        const seenIds = new Set<string>();
+        return parsed.filter((rec) => {
+          if (!rec || !rec.id || seenIds.has(rec.id)) return false;
+          seenIds.add(rec.id);
+          return true;
+        });
+      }
+      return [];
     } catch {
       return [];
     }
@@ -867,26 +881,27 @@ export default function App() {
     setGenerationStatusMessage('All assets processed successfully!');
     setIsGenerating(false);
 
-    // Save batch to history
-    setAssets((latestAssets) => {
-      const completedOnes = latestAssets.filter((a) => a.status === 'completed');
-      if (completedOnes.length > 0) {
-        const newRecord: BatchHistoryRecord = {
-          id: 'batch-' + Date.now(),
-          timestamp: new Date().toLocaleString(),
-          totalFiles: completedOnes.length,
-          marketplace: selectedMarketplace,
-          assets: completedOnes,
-        };
-        setHistory((prev) => [newRecord, ...prev.slice(0, 19)]);
+    // Save batch to history cleanly outside state updater
+    const completedOnes = assetsRef.current.filter((a) => a.status === 'completed');
+    if (completedOnes.length > 0) {
+      const uniqueBatchId = `batch-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const newRecord: BatchHistoryRecord = {
+        id: uniqueBatchId,
+        timestamp: new Date().toLocaleString(),
+        totalFiles: completedOnes.length,
+        marketplace: selectedMarketplace,
+        assets: completedOnes,
+      };
+      setHistory((prev) => {
+        const filtered = prev.filter((r) => r.id !== uniqueBatchId);
+        return [newRecord, ...filtered.slice(0, 19)];
+      });
 
-        // Auto Download CSV if enabled
-        if (settings.autoDownloadCsv) {
-          exportAssetsToCsv(completedOnes, selectedMarketplace, settings.fileExtension);
-        }
+      // Auto Download CSV if enabled
+      if (settings.autoDownloadCsv) {
+        exportAssetsToCsv(completedOnes, selectedMarketplace, settings.fileExtension);
       }
-      return latestAssets;
-    });
+    }
 
     addToast('success', 'Batch Completed!', `All ${completedCount} assets optimized in record time.`);
   };
@@ -928,12 +943,46 @@ export default function App() {
         autoRenameToTitle: settings.autoRenameFilesToTitle,
         includeTimestamp: settings.includeTimestampInRename,
         embedExifMetadata: settings.autoEmbedExifMetadata,
+        authorName: settings.authorName,
         defaultTopic: settings.defaultTopic,
         saveJpegInFolder: settings.saveJpegInFolder,
       });
       addToast('success', 'ZIP Downloaded', `Successfully packaged ${readyAssets.length} items with embedded EXIF.`);
     } catch (err: any) {
       addToast('error', 'Failed to Create ZIP', err?.message || 'Unknown error');
+    }
+  };
+
+  // Download a single image with embedded metadata
+  const handleDownloadSingleAsset = async (assetId: string) => {
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return;
+    try {
+      addToast('info', 'Preparing Download', 'Embedding lossless EXIF, IPTC & XMP metadata into image...');
+      let sourceBlob: Blob | null = null;
+      if (asset.file) {
+        sourceBlob = asset.file;
+      } else if (asset.previewUrl && asset.previewUrl.startsWith('data:')) {
+        const res = await fetch(asset.previewUrl);
+        sourceBlob = await res.blob();
+      }
+      if (!sourceBlob) {
+        throw new Error('Image source file data is unavailable.');
+      }
+      const exportName = generateRenamedFilename(asset.filename, asset.title, settings.fileExtension);
+      const safeTopic = asset.topic || asset.category || settings.defaultTopic;
+      await downloadSingleAssetWithMetadata(sourceBlob, exportName, {
+        title: asset.title || asset.filename,
+        topic: safeTopic,
+        category: asset.category,
+        description: asset.description || asset.title || asset.filename,
+        keywords: asset.keywords || [],
+        rating: 5,
+        author: asset.author || settings.authorName?.trim() || undefined,
+      });
+      addToast('success', 'File Downloaded', `Downloaded ${exportName} with embedded metadata.`);
+    } catch (err: any) {
+      addToast('error', 'Download Failed', err?.message || 'Could not download file.');
     }
   };
 
@@ -1000,11 +1049,13 @@ export default function App() {
               onRegenerateAsset={handleRegenerateAsset}
               onRegenerateAll={handleGenerate}
               onDownloadZip={handleDownloadZip}
+              onDownloadSingle={handleDownloadSingleAsset}
               onCopyText={handleCopyText}
               onExportCsv={handleExportCsv}
               onGeneratePrompt={handleGeneratePromptForAsset}
               selectedMarketplace={selectedMarketplace}
               isGenerating={isGenerating}
+              authorName={settings.authorName}
             />
           </div>
         </div>

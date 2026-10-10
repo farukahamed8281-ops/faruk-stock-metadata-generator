@@ -17,8 +17,27 @@ const port = process.env.PORT || 3000;
 
 // Shared in-memory rotation key pool (allows all users on this deployment to share keys if added)
 const globalServerKeyPool: string[] = [];
+const knownInvalidKeys = new Set<string>();
+
+// Quietly check if environment GEMINI_API_KEY is functional
 if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim()) {
-  globalServerKeyPool.push(process.env.GEMINI_API_KEY.trim());
+  const envKey = process.env.GEMINI_API_KEY.trim();
+  fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(envKey)}`)
+    .then((r) => {
+      if (r.status === 401 || !r.ok) {
+        knownInvalidKeys.add(envKey);
+        const idx = globalServerKeyPool.indexOf(envKey);
+        if (idx !== -1) globalServerKeyPool.splice(idx, 1);
+        console.info('[Server] Environment key is not authenticated for Generative Language API. App will use user-provided keys or Offline SEO Engine.');
+      } else {
+        if (!globalServerKeyPool.includes(envKey)) {
+          globalServerKeyPool.push(envKey);
+        }
+      }
+    })
+    .catch(() => {
+      // Network issue on startup; handle gracefully on request
+    });
 }
 
 // Shared Gemini instance
@@ -276,21 +295,21 @@ app.post('/api/generate-image-prompt', async (req: Request, res: Response) => {
     const keyCandidates: string[] = [];
     if (Array.isArray(apiKeys) && apiKeys.length > 0) {
       apiKeys.forEach((k) => {
-        if (typeof k === 'string' && k.trim().length > 5 && !keyCandidates.includes(k.trim())) {
+        if (typeof k === 'string' && k.trim().length > 5 && !knownInvalidKeys.has(k.trim()) && !keyCandidates.includes(k.trim())) {
           keyCandidates.push(k.trim());
         }
       });
     }
-    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !keyCandidates.includes(userKey.trim())) {
+    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !knownInvalidKeys.has(userKey.trim()) && !keyCandidates.includes(userKey.trim())) {
       keyCandidates.push(userKey.trim());
     }
     for (const poolKey of globalServerKeyPool) {
-      if (!keyCandidates.includes(poolKey)) {
+      if (!knownInvalidKeys.has(poolKey) && !keyCandidates.includes(poolKey)) {
         keyCandidates.push(poolKey);
       }
     }
-    if (process.env.GEMINI_API_KEY && !keyCandidates.includes(process.env.GEMINI_API_KEY)) {
-      keyCandidates.push(process.env.GEMINI_API_KEY);
+    if (process.env.GEMINI_API_KEY && !knownInvalidKeys.has(process.env.GEMINI_API_KEY.trim()) && !keyCandidates.includes(process.env.GEMINI_API_KEY.trim())) {
+      keyCandidates.push(process.env.GEMINI_API_KEY.trim());
     }
 
     for (const clientKey of keyCandidates) {
@@ -345,7 +364,7 @@ REQUIRED REVERSE PROMPT ANALYSIS:
         let response: any = null;
         try {
           response = await promptGenClient.models.generateContent({
-            model: 'gemini-3.7-flash',
+            model: 'gemini-2.5-flash',
             contents: contents,
             config: {
               maxOutputTokens: 4096,
@@ -377,7 +396,12 @@ REQUIRED REVERSE PROMPT ANALYSIS:
             },
           });
         } catch (callErr: any) {
-          console.warn('First attempt failed, trying fallback model config:', callErr?.message);
+          const errStr = (callErr?.message || '').toLowerCase();
+          if (errStr.includes('401') || errStr.includes('unauthenticated') || errStr.includes('access_token_type_unsupported')) {
+            knownInvalidKeys.add(clientKey);
+            console.info('[Auth] Skipped unauthenticated key for reverse prompt generation.');
+            break;
+          }
         }
 
         if (response && response.text) {
@@ -389,8 +413,8 @@ REQUIRED REVERSE PROMPT ANALYSIS:
             });
           }
         }
-      } catch (geminiVisionErr: any) {
-        console.warn('Gemini vision prompt generation failed:', geminiVisionErr?.message);
+      } catch {
+        // Fallback to next candidate
       }
     }
   }
@@ -609,21 +633,21 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
     const keyCandidates: string[] = [];
     if (Array.isArray(apiKeys) && apiKeys.length > 0) {
       apiKeys.forEach((k) => {
-        if (typeof k === 'string' && k.trim().length > 5 && !keyCandidates.includes(k.trim())) {
+        if (typeof k === 'string' && k.trim().length > 5 && !knownInvalidKeys.has(k.trim()) && !keyCandidates.includes(k.trim())) {
           keyCandidates.push(k.trim());
         }
       });
     }
-    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !keyCandidates.includes(userKey.trim())) {
+    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !knownInvalidKeys.has(userKey.trim()) && !keyCandidates.includes(userKey.trim())) {
       keyCandidates.push(userKey.trim());
     }
     for (const poolKey of globalServerKeyPool) {
-      if (!keyCandidates.includes(poolKey)) {
+      if (!knownInvalidKeys.has(poolKey) && !keyCandidates.includes(poolKey)) {
         keyCandidates.push(poolKey);
       }
     }
-    if (process.env.GEMINI_API_KEY && !keyCandidates.includes(process.env.GEMINI_API_KEY)) {
-      keyCandidates.push(process.env.GEMINI_API_KEY);
+    if (process.env.GEMINI_API_KEY && !knownInvalidKeys.has(process.env.GEMINI_API_KEY.trim()) && !keyCandidates.includes(process.env.GEMINI_API_KEY.trim())) {
+      keyCandidates.push(process.env.GEMINI_API_KEY.trim());
     }
 
     // All supported active Gemini models
@@ -647,6 +671,8 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
     // Iterate through key candidates (Key Rotation & Auto-Fallback)
     for (let keyIdx = 0; keyIdx < keyCandidates.length; keyIdx++) {
       const clientKey = keyCandidates[keyIdx];
+      if (knownInvalidKeys.has(clientKey)) continue;
+
       const genAiClient = new GoogleGenAI({
         apiKey: clientKey,
         httpOptions: {
@@ -656,7 +682,10 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
         },
       });
 
+      let isKeyAuthFailure = false;
+
       for (const targetModel of modelsToTry) {
+        if (isKeyAuthFailure) break;
         try {
           const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
 
@@ -721,7 +750,21 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             });
           } catch (modelCallErr: any) {
             const errStr = (modelCallErr?.message || '').toLowerCase();
-            console.warn(`Attempt with model ${targetModel} (key #${keyIdx + 1}) error:`, modelCallErr?.message);
+            const isAuthError =
+              errStr.includes('401') ||
+              errStr.includes('unauthenticated') ||
+              errStr.includes('access_token_type_unsupported') ||
+              errStr.includes('api_key_invalid') ||
+              errStr.includes('permission_denied') ||
+              errStr.includes('invalid authentication credentials');
+
+            if (isAuthError) {
+              knownInvalidKeys.add(clientKey);
+              isKeyAuthFailure = true;
+              console.info(`[Auth] Key #${keyIdx + 1} (${clientKey.slice(0, 6)}...) failed authentication. Skipping to next candidate.`);
+              break;
+            }
+
             const isRateLimit =
               errStr.includes('quota') ||
               errStr.includes('rate') ||
@@ -729,8 +772,8 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               errStr.includes('resource_exhausted');
 
             if (isRateLimit) {
-              console.log(`API Rate Limit hit on model ${targetModel}. Waiting 3.5s before calling next API/model...`);
-              await new Promise((r) => setTimeout(r, 3500));
+              console.info(`[Quota] Rate limit on ${targetModel}. Waiting 2.5s before fallback...`);
+              await new Promise((r) => setTimeout(r, 2500));
             }
           }
 
@@ -776,15 +819,13 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               });
             }
           }
-        } catch (geminiError: any) {
-          console.warn(`Gemini model ${targetModel} failed:`, geminiError?.message);
+        } catch {
+          // Fall through to next model or key
         }
       }
 
-      // If this key didn't return a result, pause 3.5s before switching to next API key
-      if (keyIdx < keyCandidates.length - 1) {
-        console.log(`API Key #${keyIdx + 1} did not complete. Waiting 3.5s before calling Key #${keyIdx + 2}...`);
-        await new Promise((r) => setTimeout(r, 3500));
+      if (!isKeyAuthFailure && keyIdx < keyCandidates.length - 1) {
+        await new Promise((r) => setTimeout(r, 1200));
       }
     }
 
@@ -833,6 +874,8 @@ async function addDirectoryToZip(dirPath: string, zip: JSZip, rootPath: string) 
         entry.name === '.git' ||
         entry.name === '.vite' ||
         entry.name === '.cache' ||
+        entry.name === '.env' ||
+        entry.name.endsWith('.zip') ||
         entry.name.endsWith('.log') ||
         entry.name.endsWith('.tmp')
       ) {
@@ -903,9 +946,12 @@ app.post('/api/keys-pool', (req: Request, res: Response) => {
 
 // API health check
 app.get('/api/health', (req: Request, res: Response) => {
+  const envKey = process.env.GEMINI_API_KEY?.trim();
+  const envKeyValid = Boolean(envKey) && !knownInvalidKeys.has(envKey);
+  const activePoolKeys = globalServerKeyPool.filter((k) => !knownInvalidKeys.has(k));
   res.json({
     status: 'ok',
-    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY) || globalServerKeyPool.length > 0,
+    hasGeminiKey: envKeyValid || activePoolKeys.length > 0,
     serverTime: new Date().toISOString(),
   });
 });

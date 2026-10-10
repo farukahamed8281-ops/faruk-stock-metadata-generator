@@ -8,6 +8,7 @@ export interface ZipExportOptions {
   autoRenameToTitle?: boolean;
   includeTimestamp?: boolean;
   embedExifMetadata?: boolean;
+  authorName?: string;
   defaultTopic?: string;
   saveJpegInFolder?: boolean;
 }
@@ -149,10 +150,13 @@ export async function exportAssetsToZip(
     const baseName = exportName.replace(/\.[^/.]+$/, '');
     const safeTopic = asset.topic || asset.category || defaultTopic;
 
+    const resolvedAuthor = asset.author || options?.authorName?.trim() || '';
+
     const txtContent = `=== FarukStock AI Metadata ===
 Target Marketplace: ${marketplace}
 Exported Filename: ${exportName}
 Original Filename: ${asset.filename}
+Contributor / Author: ${resolvedAuthor || '(Blank)'}
 
 Title (XPTitle / Headline):
 ${asset.title}
@@ -169,9 +173,9 @@ Tags / Keywords (${asset.keywords?.length || 0} items):
 ${(asset.keywords || []).join(', ')}
 
 Embedded Formats:
-- Windows EXIF: XPTitle, XPSubject, Rating=5, XPKeywords, XPComment
-- IPTC-IIM: ObjectName, Headline, Category, Keywords, Caption
-- Adobe XMP: dc:title, dc:subject, dc:description, xmp:Rating=5, photoshop:Category
+- Windows EXIF: XPTitle, XPSubject, Rating=5, XPKeywords, XPComment${resolvedAuthor ? `, Artist (${resolvedAuthor})` : ''}
+- IPTC-IIM: ObjectName, Headline, Category, Keywords, Caption${resolvedAuthor ? `, By-line (${resolvedAuthor})` : ''}
+- Adobe XMP: dc:title, dc:subject, dc:description, xmp:Rating=5, photoshop:Category${resolvedAuthor ? `, dc:creator (${resolvedAuthor})` : ''}
 `;
     metadataFolder?.file(`${baseName}_metadata.txt`, txtContent);
   });
@@ -182,6 +186,7 @@ Embedded Formats:
   for (const asset of assets) {
     const exportName = getExportFilename(asset);
     const safeTopic = asset.topic || asset.category || defaultTopic;
+    const assetAuthor = asset.author || options?.authorName?.trim() || undefined;
 
     let sourceBlob: Blob | null = null;
 
@@ -208,6 +213,7 @@ Embedded Formats:
             description: asset.description || asset.title || asset.filename,
             keywords: asset.keywords || [],
             rating: 5,
+            author: assetAuthor,
           });
           targetFolder.file(exportName, buffer);
         } catch (embedErr) {

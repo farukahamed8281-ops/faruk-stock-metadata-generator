@@ -25,6 +25,7 @@ export interface StockAsset {
   error?: string;
   category: string;
   topic?: string;
+  author?: string; // Optional per-asset author override
   // Generated metadata
   title: string;
   rawTitle?: string;
@@ -66,6 +67,7 @@ export interface GenerationSettings {
   autoRenameFiles: boolean;
   autoRenameFilesToTitle: boolean;
   autoEmbedExifMetadata: boolean;
+  authorName?: string; // Contributor Display Name / Account Name (blank by default)
   includeTimestampInRename: boolean;
   defaultTopic: string;
   saveJpegInFolder: boolean;
