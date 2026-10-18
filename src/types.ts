@@ -33,6 +33,7 @@ export interface StockAsset {
   rawDescription?: string;
   keywords: string[];
   rawKeywords?: string[];
+  conceptualKeywords?: string[]; // 3-5 abstract emotional/concept keywords (e.g. hope, future, innovation)
   marketplace: Marketplace;
   generatedAt?: string;
 
@@ -98,6 +99,7 @@ export interface GenerationSettings {
   apiKeys?: string[]; // Multiple API Key rotation pool
   offlineModeEnabled?: boolean; // No API key required - runs on Smart SEO Heuristic Engine
   adobeTop10Priority?: boolean; // Sorts & highlights the top 5-10 keywords for Adobe Stock algorithm ranking
+  includeConceptualKeywords?: boolean; // Injects 3-5 top abstract emotional / commercial message keywords (e.g. hope, future, innovation)
 
   // Image to Prompt Settings
   targetPromptGenerator: 'midjourney' | 'flux' | 'dalle' | 'gemini' | 'flow' | 'firefly' | 'universal';

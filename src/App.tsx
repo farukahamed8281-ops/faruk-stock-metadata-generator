@@ -104,6 +104,7 @@ export default function App() {
       themeColor: '#ff5533',
       strictStockCompliance: true,
       adobeTop10Priority: true,
+      includeConceptualKeywords: true,
       negativeKeywords: [
         'watermark',
         'copyright',

@@ -653,6 +653,24 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                   </p>
                 </div>
               )}
+
+              {/* Conceptual & Emotional keywords indicator */}
+              {asset.conceptualKeywords && asset.conceptualKeywords.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-[#1e2432]/70 mt-1.5">
+                  <span className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>Conceptual & Emotion Tags:</span>
+                  </span>
+                  {asset.conceptualKeywords.map((ck, i) => (
+                    <span
+                      key={i}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 font-medium"
+                    >
+                      {ck}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Image to AI Prompt (Reverse Prompt Engineering) */}

@@ -99,6 +99,7 @@ async function generateViaDirectGemini(
     advanceIsolatedWhite?: boolean;
     advanceVector?: boolean;
     advanceIllustration?: boolean;
+    includeConceptualKeywords?: boolean;
   }
 ) {
   const chosenModel = model && model.trim() ? model.trim() : 'gemini-2.5-flash';
@@ -127,6 +128,9 @@ ${params.advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The asset is
 ${params.advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
 ${params.advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${params.advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
+${params.includeConceptualKeywords !== false ? `- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
+In addition to physical visual objects, analyze the underlying mood, emotional resonance, and abstract commercial message of this image (e.g., for renewable energy: "hope", "future", "clean start", "innovation", "responsibility"; for corporate/business: "success", "teamwork", "leadership", "partnership", "growth"; for medical/wellness: "care", "vitality", "trust", "wellness").
+Identify exactly 3-5 top-matching conceptual/abstract keywords. Integrate them into the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
 - Description: ${params.descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : `Concise commercial description under ${params.descLength} characters.`}
 - Category & Topic: Identify the best fitting microstock category and subject topic.
 
@@ -138,6 +142,7 @@ Output ONLY valid JSON matching this schema:
   "topic": "Subject topic",
   "description": "Stock description",
   "keywords": ["kw1", "kw2", ... exactly ${params.keywordsCount} keywords],
+  "conceptualKeywords": ["concept1", "concept2", "concept3"],
   "category": "Stock Category"
 }`;
 
@@ -396,7 +401,8 @@ export function generateClientFallbackMetadata(
   maxDescLength = 120,
   advanceVector = false,
   advanceIllustration = false,
-  customTopic = ''
+  customTopic = '',
+  includeConceptualKeywords = true
 ) {
   const cleanName = filename
     .replace(/\.[^/.]+$/, '')
@@ -504,7 +510,24 @@ export function generateClientFallbackMetadata(
     ],
   };
 
+  const conceptualKeywordsMap: Record<string, string[]> = {
+    'Business & Finance': ['success', 'teamwork', 'leadership', 'growth', 'achievement'],
+    'Technology': ['innovation', 'connectivity', 'future', 'digital transformation', 'efficiency'],
+    'People & Lifestyle': ['happiness', 'togetherness', 'freedom', 'wellbeing', 'authenticity'],
+    'Nature & Landscapes': ['harmony', 'sustainability', 'tranquility', 'hope', 'preservation'],
+    'Graphic Resources': ['creativity', 'elegance', 'modernity', 'inspiration', 'simplicity'],
+    'Health & Wellness': ['vitality', 'balance', 'healing', 'mindfulness', 'energy'],
+    'Food & Beverage': ['abundance', 'tradition', 'pleasure', 'celebration', 'freshness'],
+    'Travel & Exploration': ['adventure', 'discovery', 'curiosity', 'journey', 'wanderlust'],
+    'Education & Learning': ['knowledge', 'opportunity', 'empowerment', 'curiosity', 'progress'],
+    'Industrial & Architecture': ['strength', 'precision', 'infrastructure', 'durability', 'vision'],
+  };
+
   const pool = categoryKeywordBank[selectedCategory] || categoryKeywordBank['Business & Finance'];
+  const conceptualKeywords = includeConceptualKeywords
+    ? (conceptualKeywordsMap[selectedCategory] || ['success', 'inspiration', 'creativity', 'growth', 'innovation']).slice(0, 5)
+    : [];
+
   const finalKeywords: string[] = [];
 
   // Add meaningful words from title first (highest search ranking)
@@ -518,6 +541,11 @@ export function generateClientFallbackMetadata(
       if (!finalKeywords.includes(k)) finalKeywords.push(k);
     });
   }
+
+  // Inject conceptual keywords into the keywords pool
+  conceptualKeywords.forEach((ck) => {
+    if (!finalKeywords.includes(ck)) finalKeywords.push(ck);
+  });
 
   pool.forEach((k) => {
     if (finalKeywords.length < targetKeywordsCount && !finalKeywords.includes(k)) {
@@ -540,6 +568,7 @@ export function generateClientFallbackMetadata(
     rawDescription: `${cleanedTitle}. High quality microstock asset suitable for commercial design, marketing, and editorial publications.`,
     keywords: alignedKeywords,
     rawKeywords: alignedKeywords,
+    conceptualKeywords: conceptualKeywords.length > 0 ? conceptualKeywords : undefined,
     category: selectedCategory,
     source: 'Smart Stock Taxonomy Engine (Free Instant Web Engine)',
   };
@@ -594,7 +623,8 @@ export async function generateMetadataForAsset(
       settings.descLength,
       asset.advanceVector ?? settings.advanceVector,
       asset.advanceIllustration ?? settings.advanceIllustration,
-      asset.topic || settings.defaultTopic
+      asset.topic || settings.defaultTopic,
+      settings.includeConceptualKeywords ?? true
     );
   }
 
@@ -758,6 +788,7 @@ export async function generateMetadataForAsset(
     settings.descLength,
     asset.advanceVector ?? settings.advanceVector,
     asset.advanceIllustration ?? settings.advanceIllustration,
-    asset.topic || settings.defaultTopic
+    asset.topic || settings.defaultTopic,
+    settings.includeConceptualKeywords ?? true
   );
 }

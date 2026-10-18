@@ -357,6 +357,39 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
               className="w-full h-1.5 bg-[#2a3140] rounded-lg appearance-none cursor-pointer"
             />
           </div>
+
+          {/* Conceptual & Emotion Keywords Toggle (বিমূর্ত কিওয়ার্ড) */}
+          <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-[#141720] border border-[#272e3d]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-xs font-semibold text-gray-200">Conceptual Keywords (বিমূর্ত কিওয়ার্ড)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateSettings({
+                    includeConceptualKeywords: !(settings.includeConceptualKeywords ?? true),
+                  })
+                }
+                className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
+                  (settings.includeConceptualKeywords ?? true) ? 'bg-[#ff5533]' : 'bg-[#3b4252]'
+                }`}
+                style={{
+                  backgroundColor: (settings.includeConceptualKeywords ?? true) ? activeThemeColor : undefined,
+                }}
+              >
+                <div
+                  className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                    (settings.includeConceptualKeywords ?? true) ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-400 leading-normal">
+              স্বয়ংক্রিয়ভাবে ইমেজের সাবজেক্ট ও মুড বিশ্লেষণ করে ৩–৫টি সেরা বিমূর্ত/অনুভূতিমূলক কিওয়ার্ড (যেমন: <span className="text-amber-300 font-medium">hope, future, innovation, responsibility</span>) ইনজেক্ট করে যা বায়ারদের বাণিজ্যিক সার্চে দ্রুত র‍্যাঙ্ক আনে।
+            </p>
+          </div>
         </div>
       ) : (
         /* Prompt Tab Content */

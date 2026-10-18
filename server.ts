@@ -63,7 +63,8 @@ function generateFallbackMetadata(
   maxDescLength = 120,
   advanceVector = false,
   advanceIllustration = false,
-  customTopic = ''
+  customTopic = '',
+  includeConceptualKeywords = true
 ) {
   const cleanName = filename
     .replace(/\.[^/.]+$/, '')
@@ -161,6 +162,19 @@ function generateFallbackMetadata(
     ],
   };
 
+  const conceptualKeywordsMap: Record<string, string[]> = {
+    'Business & Finance': ['success', 'teamwork', 'leadership', 'growth', 'partnership'],
+    'Technology': ['innovation', 'future', 'connectivity', 'progress', 'intelligence'],
+    'People & Lifestyle': ['happiness', 'freedom', 'togetherness', 'wellness', 'vitality'],
+    'Nature & Landscapes': ['hope', 'future', 'sustainability', 'clean start', 'responsibility'],
+    'Graphic Resources': ['creativity', 'modernity', 'inspiration', 'elegance', 'vision'],
+    'Architectural Blueprint': ['structure', 'planning', 'foundation', 'development', 'vision'],
+  };
+
+  const conceptualKeywords = includeConceptualKeywords
+    ? (conceptualKeywordsMap[selectedCategory] || ['concept', 'inspiration', 'growth', 'opportunity', 'future']).slice(0, 5)
+    : [];
+
   const baseKeywords = photoStockKeywords[selectedCategory] || photoStockKeywords['Business & Finance'];
   const finalKeywords: string[] = [];
 
@@ -175,6 +189,11 @@ function generateFallbackMetadata(
   meaningfulWords.forEach((w) => {
     const lw = w.toLowerCase();
     if (!finalKeywords.includes(lw)) finalKeywords.push(lw);
+  });
+
+  // Inject conceptual keywords into the keyword pool if enabled
+  conceptualKeywords.forEach((ck) => {
+    if (!finalKeywords.includes(ck)) finalKeywords.push(ck);
   });
 
   // Fill up with high volume niche keywords
@@ -192,7 +211,11 @@ function generateFallbackMetadata(
     title += ' - Vector Illustration';
   }
   if (title.length > maxTitleLength) {
-    title = title.substring(0, maxTitleLength - 3).trim() + '...';
+    title = title.substring(0, maxTitleLength - 3).trim();
+  }
+  title = title.replace(/[.,;:!?\s]+$/, '').trim();
+  if (title.length > 0) {
+    title = `${title}.`;
   }
 
   let description = `${primarySubject}, suitable for commercial microstock, advertising, presentations, editorial and digital marketing.`;
@@ -205,6 +228,7 @@ function generateFallbackMetadata(
     topic: selectedCategory,
     description: maxDescLength === 0 ? '' : description,
     keywords,
+    conceptualKeywords,
     category: selectedCategory,
     confidenceScore: 0.98,
     source: 'FarukStock SEO Engine',
@@ -607,6 +631,7 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
       advanceIsolatedWhite = false,
       advanceVector = false,
       advanceIllustration = false,
+      includeConceptualKeywords = true,
     } = req.body;
 
     if (!filename) {
@@ -621,7 +646,11 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
         marketplace,
         keywordsCount,
         titleLength,
-        descLength
+        descLength,
+        advanceVector,
+        advanceIllustration,
+        req.body?.topic || '',
+        includeConceptualKeywords
       );
       return res.json({
         ...offlineMetadata,
@@ -701,6 +730,10 @@ ${advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The asset is on a T
 ${advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
 ${advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
+${includeConceptualKeywords ? `
+- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
+In addition to physical visual objects, analyze the underlying mood, emotional resonance, and abstract commercial message of this image (e.g., for renewable energy: "hope", "future", "clean start", "innovation", "responsibility"; for corporate/business: "success", "teamwork", "leadership", "partnership", "growth"; for medical/wellness: "care", "vitality", "trust", "wellness").
+Identify exactly 3-5 top-matching conceptual/abstract keywords. Integrate them into the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
 - Description: ${descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : `Concise commercial description under ${descLength} characters.`}
 - Category & Topic: Provide the single best microstock category and subject topic name.
 
@@ -741,6 +774,11 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
                       type: Type.ARRAY,
                       items: { type: Type.STRING },
                       description: 'Exact ranked keywords list',
+                    },
+                    conceptualKeywords: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: '3-5 abstract, emotion, or commercial message keywords (e.g. hope, future, innovation)',
                     },
                     category: { type: Type.STRING, description: 'Best fitting stock category' },
                   },
@@ -805,6 +843,9 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
 
               let rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
               let resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30);
+              let conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
+                ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
+                : [];
 
               return res.json({
                 title: resTitle,
@@ -814,6 +855,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
                 rawDescription: parsed.description || '',
                 keywords: resKeywords,
                 rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
+                conceptualKeywords,
                 category: parsed.category || category,
                 source: `Google Gemini (${targetModel})`,
               });
@@ -839,7 +881,8 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
       descLength,
       advanceVector,
       advanceIllustration,
-      req.body?.topic || ''
+      req.body?.topic || '',
+      includeConceptualKeywords
     );
     return res.json(fallback);
   } catch (err: any) {
@@ -853,7 +896,8 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
       req.body?.descLength || 120,
       req.body?.advanceVector || false,
       req.body?.advanceIllustration || false,
-      req.body?.topic || ''
+      req.body?.topic || '',
+      req.body?.includeConceptualKeywords ?? true
     );
     return res.json(fallback);
   }
