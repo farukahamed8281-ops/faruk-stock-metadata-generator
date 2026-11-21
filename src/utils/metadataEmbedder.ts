@@ -2,7 +2,7 @@
  * Lossless EXIF / IPTC / XMP Metadata Embedder for JPEG and PNG images
  * Embeds Title, Subject (Topic), 5-Star Rating, Tags (Keywords), and Comments (Description)
  * directly into image binary headers with 0% quality loss.
- * Enables direct marketplace upload (Adobe Stock, Shutterstock, Freepik, etc.)
+ * Enables direct marketplace upload (Adobe Stock, Shutterstock, Magnific, etc.)
  * without requiring secondary CSV files, and fills Windows File Properties Details.
  */
 
@@ -22,14 +22,26 @@ function stringToUtf16LE(str: string, nullTerminate: boolean = true): Uint8Array
   return bytes;
 }
 
+// Helper: Clean common Unicode punctuation before ASCII conversion
+function normalizeToAsciiSafe(str: string): string {
+  return (str || '')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Helper: String to ASCII Uint8Array with null terminator
 function stringToAscii(str: string, nullTerminate: boolean = true): Uint8Array {
-  const len = str.length + (nullTerminate ? 1 : 0);
+  const safe = normalizeToAsciiSafe(str);
+  const len = safe.length + (nullTerminate ? 1 : 0);
   const bytes = new Uint8Array(len);
-  for (let i = 0; i < str.length; i++) {
-    bytes[i] = str.charCodeAt(i) & 0x7f;
+  for (let i = 0; i < safe.length; i++) {
+    bytes[i] = safe.charCodeAt(i) & 0x7f;
   }
-  if (nullTerminate) bytes[str.length] = 0;
+  if (nullTerminate) bytes[safe.length] = 0;
   return bytes;
 }
 
@@ -501,15 +513,23 @@ export function embedMetadataInJpeg(
     }
 
     // Segment length includes 2 bytes of length
+    if (offset + 3 >= jpegBytes.length) {
+      parts.push(jpegBytes.slice(offset));
+      break;
+    }
     const segLen = (jpegBytes[offset + 2] << 8) | jpegBytes[offset + 3];
     const totalSegSize = 2 + segLen;
+    if (segLen < 2 || offset + totalSegSize > jpegBytes.length) {
+      parts.push(jpegBytes.slice(offset));
+      break;
+    }
 
     // Check if this segment is old Exif/XMP (0xFFE1) or IPTC (0xFFED)
     const isOldExifOrXmp = marker === 0xe1;
     const isOldIptc = marker === 0xed;
 
     if (!isOldExifOrXmp && !isOldIptc) {
-      // Keep other segments intact (quantization tables, frames, comments, etc.)
+      // Keep other segments intact (quantization tables, ICC color profiles, frames, comments, etc.)
       parts.push(jpegBytes.slice(offset, offset + totalSegSize));
     }
 
@@ -530,7 +550,7 @@ export function embedMetadataInJpeg(
 }
 
 /**
- * Embeds XMP and tEXt chunks into a PNG binary buffer losslessly
+ * Embeds XMP and tEXt chunks into a PNG binary buffer losslessly (deduplicating prior metadata chunks)
  */
 export function embedMetadataInPng(
   pngBytes: Uint8Array,
@@ -553,18 +573,14 @@ export function embedMetadataInPng(
   const createChunk = (type: string, data: Uint8Array): Uint8Array => {
     const chunkLen = data.length;
     const chunk = new Uint8Array(4 + 4 + chunkLen + 4);
-    // Length (4 bytes big-endian)
     chunk[0] = (chunkLen >> 24) & 0xff;
     chunk[1] = (chunkLen >> 16) & 0xff;
     chunk[2] = (chunkLen >> 8) & 0xff;
     chunk[3] = chunkLen & 0xff;
-    // Chunk Type (4 bytes)
     for (let i = 0; i < 4; i++) {
       chunk[4 + i] = type.charCodeAt(i);
     }
-    // Data
     chunk.set(data, 8);
-    // CRC (Type + Data)
     const crcVal = crc32(chunk.slice(4, 8 + chunkLen));
     const crcPos = 8 + chunkLen;
     chunk[crcPos] = (crcVal >> 24) & 0xff;
@@ -580,7 +596,7 @@ export function embedMetadataInPng(
     const textBytes = enc.encode(text);
     const data = new Uint8Array(keyBytes.length + 1 + textBytes.length);
     data.set(keyBytes, 0);
-    data[keyBytes.length] = 0; // Null separator
+    data[keyBytes.length] = 0;
     data.set(textBytes, keyBytes.length + 1);
     return createChunk('tEXt', data);
   };
@@ -613,24 +629,71 @@ export function embedMetadataInPng(
 
   chunksToAdd.push(xmpChunk);
 
-  // Find IHDR chunk (starts at offset 8, 8 bytes sig + 4 len + 4 type + 13 data + 4 crc = 33)
+  const managedTextKeys = new Set([
+    'Title', 'Subject', 'Topic', 'Description', 'Comment', 'Keywords', 'Author', 'Software',
+  ]);
+
+  // Parse existing chunks after PNG signature + IHDR so old duplicate metadata chunks are stripped cleanly
   const ihdrEnd = 8 + 4 + 4 + 13 + 4;
+  if (pngBytes.length < ihdrEnd) return pngBytes;
 
-  const resultLength = pngBytes.length + chunksToAdd.reduce((acc, c) => acc + c.length, 0);
-  const result = new Uint8Array(resultLength);
+  const keptTailChunks: Uint8Array[] = [];
+  let pos = ihdrEnd;
+  while (pos + 12 <= pngBytes.length) {
+    const chunkLen =
+      ((pngBytes[pos] << 24) | (pngBytes[pos + 1] << 16) | (pngBytes[pos + 2] << 8) | pngBytes[pos + 3]) >>> 0;
+    const totalChunkLen = 12 + chunkLen;
+    if (pos + totalChunkLen > pngBytes.length) {
+      keptTailChunks.push(pngBytes.slice(pos));
+      break;
+    }
 
-  // Copy signature and IHDR
+    const type = String.fromCharCode(
+      pngBytes[pos + 4],
+      pngBytes[pos + 5],
+      pngBytes[pos + 6],
+      pngBytes[pos + 7]
+    );
+    const dataSlice = pngBytes.slice(pos + 8, pos + 8 + chunkLen);
+
+    let shouldSkip = false;
+    if (type === 'tEXt') {
+      const nullIdx = dataSlice.indexOf(0);
+      if (nullIdx > 0) {
+        const key = new TextDecoder().decode(dataSlice.slice(0, nullIdx));
+        if (managedTextKeys.has(key)) shouldSkip = true;
+      }
+    } else if (type === 'iTXt') {
+      const nullIdx = dataSlice.indexOf(0);
+      if (nullIdx > 0) {
+        const key = new TextDecoder().decode(dataSlice.slice(0, nullIdx));
+        if (key === 'XML:com.adobe.xmp') shouldSkip = true;
+      }
+    }
+
+    if (!shouldSkip) {
+      keptTailChunks.push(pngBytes.slice(pos, pos + totalChunkLen));
+    }
+
+    pos += totalChunkLen;
+    if (type === 'IEND') break;
+  }
+
+  const tailSize = keptTailChunks.reduce((acc, c) => acc + c.length, 0);
+  const addedSize = chunksToAdd.reduce((acc, c) => acc + c.length, 0);
+  const result = new Uint8Array(ihdrEnd + addedSize + tailSize);
+
   result.set(pngBytes.slice(0, ihdrEnd), 0);
   let cur = ihdrEnd;
 
-  // Insert our metadata chunks right after IHDR
   for (const chunk of chunksToAdd) {
     result.set(chunk, cur);
     cur += chunk.length;
   }
-
-  // Copy the rest of the PNG
-  result.set(pngBytes.slice(ihdrEnd), cur);
+  for (const chunk of keptTailChunks) {
+    result.set(chunk, cur);
+    cur += chunk.length;
+  }
 
   return result;
 }

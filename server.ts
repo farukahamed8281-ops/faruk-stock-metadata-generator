@@ -2,55 +2,73 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import JSZip from 'jszip';
-import { GoogleGenAI, Type } from '@google/genai';
+import { execFile } from 'child_process';
+import util from 'util';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
-import { getMarketplaceSeoProfile } from './src/utils/marketplacePrompts';
-import { sanitizeTitle, alignKeywordsWithTitle } from './src/utils/stockSeoSanitizer';
+import {
+  getMarketplaceSeoProfile,
+  getVideoSeoDirective,
+  MediaInspectionMeta,
+} from './src/utils/marketplacePrompts';
+import {
+  sanitizeTitle,
+  alignKeywordsWithTitle,
+  normalizeCategoryForMarketplace,
+  truncateAtWordBoundary,
+} from './src/utils/stockSeoSanitizer';
 
 dotenv.config();
 
+const execFileAsync = util.promisify(execFile);
+
+const VIDEO_PREP_DIR = path.join(os.tmpdir(), 'faruk_video_prep');
+function isValidPrepId(id: unknown): id is string {
+  return typeof id === 'string' && /^[a-zA-Z0-9_-]{8,64}$/.test(id);
+}
+async function cleanupExpiredVideoPrepFiles() {
+  try {
+    await fs.promises.mkdir(VIDEO_PREP_DIR, { recursive: true });
+    const files = await fs.promises.readdir(VIDEO_PREP_DIR);
+    const cutoff = Date.now() - 20 * 60 * 1000;
+    await Promise.all(
+      files.map(async (f) => {
+        try {
+          const full = path.join(VIDEO_PREP_DIR, f);
+          const stat = await fs.promises.stat(full);
+          if (stat.mtimeMs < cutoff) {
+            await fs.promises.unlink(full);
+          }
+        } catch {}
+      })
+    );
+  } catch {}
+}
+
 const app = express();
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '120mb' }));
 
-const port = process.env.PORT || 3000;
+const port = 3000;
 
-// Shared in-memory rotation key pool (allows all users on this deployment to share keys if added)
-const globalServerKeyPool: string[] = [];
-const knownInvalidKeys = new Set<string>();
+let isEnvKeyValid = false;
 
-// Quietly check if environment GEMINI_API_KEY is functional
+// Quietly check if host environment GEMINI_API_KEY is functional
 if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim()) {
   const envKey = process.env.GEMINI_API_KEY.trim();
   fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(envKey)}`)
     .then((r) => {
       if (r.status === 401 || !r.ok) {
-        knownInvalidKeys.add(envKey);
-        const idx = globalServerKeyPool.indexOf(envKey);
-        if (idx !== -1) globalServerKeyPool.splice(idx, 1);
-        console.info('[Server] Environment key is not authenticated for Generative Language API. App will use user-provided keys or Offline SEO Engine.');
+        isEnvKeyValid = false;
+        console.info('[Server] Environment key is not authenticated for Generative Language API. Users will use their own API keys or Offline SEO Engine.');
       } else {
-        if (!globalServerKeyPool.includes(envKey)) {
-          globalServerKeyPool.push(envKey);
-        }
+        isEnvKeyValid = true;
       }
     })
     .catch(() => {
       // Network issue on startup; handle gracefully on request
     });
-}
-
-// Shared Gemini instance
-let ai: GoogleGenAI | null = null;
-if (process.env.GEMINI_API_KEY) {
-  ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
 }
 
 // Intelligent stock taxonomy dictionary for unlimited free metadata generation with Top 5 Keyword Weight & Title Accuracy
@@ -208,30 +226,24 @@ function generateFallbackMetadata(
 
   let title = primarySubject;
   if (isVectorType && !title.toLowerCase().includes('vector')) {
-    title += ' - Vector Illustration';
+    title += ' Vector Illustration';
   }
-  if (title.length > maxTitleLength) {
-    title = title.substring(0, maxTitleLength - 3).trim();
-  }
-  title = title.replace(/[.,;:!?\s]+$/, '').trim();
-  if (title.length > 0) {
-    title = `${title}.`;
-  }
+  title = truncateAtWordBoundary(title, maxTitleLength);
+  title = sanitizeTitle(title);
 
-  let description = `${primarySubject}, suitable for commercial microstock, advertising, presentations, editorial and digital marketing.`;
-  if (description.length > maxDescLength && maxDescLength > 0) {
-    description = description.substring(0, maxDescLength - 3).trim() + '...';
-  }
+  const normalizedCat = normalizeCategoryForMarketplace(selectedCategory, marketplace as any);
+  const fullDesc = `${primarySubject}, suitable for commercial design, advertising, presentations, and editorial publications.`;
+  const description = maxDescLength === 0 ? '' : truncateAtWordBoundary(fullDesc, maxDescLength);
 
   return {
     title,
     topic: selectedCategory,
-    description: maxDescLength === 0 ? '' : description,
-    keywords,
+    description,
+    keywords: alignKeywordsWithTitle(title, keywords, targetKeywordsCount, marketplace as any),
     conceptualKeywords,
-    category: selectedCategory,
+    category: normalizedCat,
     confidenceScore: 0.98,
-    source: 'FarukStock SEO Engine',
+    source: 'Offline Smart SEO Engine',
   };
 }
 
@@ -319,20 +331,15 @@ app.post('/api/generate-image-prompt', async (req: Request, res: Response) => {
     const keyCandidates: string[] = [];
     if (Array.isArray(apiKeys) && apiKeys.length > 0) {
       apiKeys.forEach((k) => {
-        if (typeof k === 'string' && k.trim().length > 5 && !knownInvalidKeys.has(k.trim()) && !keyCandidates.includes(k.trim())) {
+        if (typeof k === 'string' && k.trim().length > 5 && !keyCandidates.includes(k.trim())) {
           keyCandidates.push(k.trim());
         }
       });
     }
-    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !knownInvalidKeys.has(userKey.trim()) && !keyCandidates.includes(userKey.trim())) {
+    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !keyCandidates.includes(userKey.trim())) {
       keyCandidates.push(userKey.trim());
     }
-    for (const poolKey of globalServerKeyPool) {
-      if (!knownInvalidKeys.has(poolKey) && !keyCandidates.includes(poolKey)) {
-        keyCandidates.push(poolKey);
-      }
-    }
-    if (process.env.GEMINI_API_KEY && !knownInvalidKeys.has(process.env.GEMINI_API_KEY.trim()) && !keyCandidates.includes(process.env.GEMINI_API_KEY.trim())) {
+    if (keyCandidates.length === 0 && isEnvKeyValid && process.env.GEMINI_API_KEY) {
       keyCandidates.push(process.env.GEMINI_API_KEY.trim());
     }
 
@@ -388,10 +395,10 @@ REQUIRED REVERSE PROMPT ANALYSIS:
         let response: any = null;
         try {
           response = await promptGenClient.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-4-hydrogen',
             contents: contents,
             config: {
-              maxOutputTokens: 4096,
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
               responseMimeType: 'application/json',
               responseSchema: {
                 type: Type.OBJECT,
@@ -422,7 +429,6 @@ REQUIRED REVERSE PROMPT ANALYSIS:
         } catch (callErr: any) {
           const errStr = (callErr?.message || '').toLowerCase();
           if (errStr.includes('401') || errStr.includes('unauthenticated') || errStr.includes('access_token_type_unsupported')) {
-            knownInvalidKeys.add(clientKey);
             console.info('[Auth] Skipped unauthenticated key for reverse prompt generation.');
             break;
           }
@@ -505,7 +511,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
       if (googleResp.ok && googleData?.models) {
         return res.json({
           valid: true,
-          model: 'gemini-3.7-flash',
+          model: 'gemini-4-hydrogen',
           message: 'Google Gemini API Key successfully verified and connected!',
         });
       }
@@ -529,7 +535,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
       if (googleResp.status === 503 || googleResp.status === 429 || errMsg.includes('high demand') || errMsg.includes('RESOURCE_EXHAUSTED')) {
         return res.json({
           valid: true,
-          model: 'gemini-3.7-flash',
+          model: 'gemini-4-hydrogen',
           message: 'Google Gemini API Key authenticated successfully (High traffic mode)!',
         });
       }
@@ -539,10 +545,11 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 
     // 2. Fallback candidate model ping
     const candidateModels = [
-      'gemini-2.5-flash',
-      'gemini-3.8-flash',
+      'gemini-4-hydrogen',
       'gemini-3.1-flash-lite',
-      'gemini-3.1-pro-preview'
+      'gemini-2.5-flash',
+      'gemini-4-neon',
+      'gemini-3.1-pro-preview',
     ];
 
     let lastError = 'Authentication failed. Please check your API key.';
@@ -594,7 +601,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
     if ((trimmedKey.startsWith('AIzaSy') || trimmedKey.startsWith('AQ.')) && trimmedKey.length >= 25) {
       return res.json({
         valid: true,
-        model: 'gemini-2.5-flash',
+        model: 'gemini-4-hydrogen',
         message: 'Google Gemini API Key accepted and activated!',
       });
     }
@@ -609,13 +616,201 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
   }
 });
 
+// Endpoint: Chunked Raw Video Upload (safe under Cloud Run 32MB limit for 30-250MB MP4/MOV clips)
+app.post(
+  '/api/video-prepare/chunk',
+  express.raw({ limit: '12mb', type: ['application/octet-stream', '*/*'] }),
+  async (req: Request, res: Response) => {
+    try {
+      const uploadId = String(req.headers['x-upload-id'] || '');
+      const chunkIndex = Number(req.headers['x-chunk-index']);
+      if (!isValidPrepId(uploadId) || !Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= 200) {
+        return res.status(400).json({ error: 'Invalid video upload chunk parameters.' });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'Empty video chunk payload.' });
+      }
+      await fs.promises.mkdir(VIDEO_PREP_DIR, { recursive: true });
+      const chunkPath = path.join(VIDEO_PREP_DIR, `${uploadId}.c${chunkIndex}`);
+      await fs.promises.writeFile(chunkPath, req.body);
+      return res.json({ ok: true, chunkIndex, bytes: req.body.length });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Chunk write failed.' });
+    }
+  }
+);
+
+// Endpoint: Finalize Video Chunks -> ffprobe + 4-frame (15/40/65/85%) extraction + lightweight 480p proxy MP4
+app.post('/api/video-prepare/finalize', async (req: Request, res: Response) => {
+  const { uploadId, filename = 'video.mp4', totalChunks, createMotionProxy = true } = req.body || {};
+  if (!isValidPrepId(uploadId) || !Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks >= 200) {
+    return res.status(400).json({ error: 'Invalid finalize parameters.' });
+  }
+
+  cleanupExpiredVideoPrepFiles().catch(() => {});
+
+  const rawExt = path.extname(String(filename)).toLowerCase();
+  const safeExt = ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.m4v'].includes(rawExt) ? rawExt : '.mp4';
+  const inputPath = path.join(VIDEO_PREP_DIR, `${uploadId}${safeExt}`);
+  const proxyPath = path.join(VIDEO_PREP_DIR, `${uploadId}_proxy.mp4`);
+
+  try {
+    await fs.promises.mkdir(VIDEO_PREP_DIR, { recursive: true });
+
+    // Sequentially merge chunks to keep memory flat
+    const handle = await fs.promises.open(inputPath, 'w');
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = path.join(VIDEO_PREP_DIR, `${uploadId}.c${i}`);
+        const buf = await fs.promises.readFile(chunkPath);
+        await handle.write(buf);
+        await fs.promises.unlink(chunkPath).catch(() => {});
+      }
+    } finally {
+      await handle.close();
+    }
+
+    // 1. Inspect resolution, duration, and orientation with ffprobe
+    let width = 0;
+    let height = 0;
+    let durationSec = 0;
+    try {
+      const { stdout } = await execFileAsync(
+        'ffprobe',
+        ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', inputPath],
+        { timeout: 15000 }
+      );
+      const probe = JSON.parse(stdout || '{}');
+      const vStream = Array.isArray(probe.streams)
+        ? probe.streams.find((s: any) => s.codec_type === 'video')
+        : undefined;
+      width = Number(vStream?.width || 0);
+      height = Number(vStream?.height || 0);
+      durationSec = parseFloat(vStream?.duration || probe?.format?.duration || '0') || 0;
+    } catch (probeErr) {
+      console.warn('ffprobe warning:', probeErr);
+    }
+
+    const orientation: MediaInspectionMeta['orientation'] =
+      width && height
+        ? width > height * 1.05
+          ? 'horizontal'
+          : height > width * 1.05
+          ? 'vertical'
+          : 'square'
+        : 'horizontal';
+
+    // 2. Extract 4 chronological frames (15%, 40%, 65%, 85%)
+    const positions = [0.15, 0.4, 0.65, 0.85];
+    const frames: string[] = [];
+    for (let i = 0; i < positions.length; i++) {
+      const t =
+        durationSec > 0.4
+          ? Math.min(Math.max(0.05, durationSec * positions[i]), Math.max(0.1, durationSec - 0.05))
+          : 0;
+      const framePath = path.join(VIDEO_PREP_DIR, `${uploadId}_f${i}.jpg`);
+      try {
+        await execFileAsync(
+          'ffmpeg',
+          [
+            '-y',
+            '-ss',
+            t.toFixed(2),
+            '-i',
+            inputPath,
+            '-frames:v',
+            '1',
+            '-vf',
+            "scale='min(640,iw)':-2",
+            '-q:v',
+            '4',
+            framePath,
+          ],
+          { timeout: 25000 }
+        );
+        const fBuf = await fs.promises.readFile(framePath);
+        if (fBuf.length > 0) {
+          frames.push(`data:image/jpeg;base64,${fBuf.toString('base64')}`);
+        }
+      } catch (frameErr) {
+        console.warn(`ffmpeg frame ${i} extraction warning:`, frameErr);
+      } finally {
+        await fs.promises.unlink(framePath).catch(() => {});
+      }
+    }
+
+    // 3. Build compact 480p silent H.264 MP4 proxy (<= 10.5MB) so Gemini watches the real moving video
+    let proxyReady = false;
+    if (createMotionProxy) {
+      try {
+        await execFileAsync(
+          'ffmpeg',
+          [
+            '-y',
+            '-i',
+            inputPath,
+            '-vf',
+            "scale='min(768,iw)':-2:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            '-r',
+            '10',
+            '-c:v',
+            'libx264',
+            '-preset',
+            'veryfast',
+            '-crf',
+            '30',
+            '-pix_fmt',
+            'yuv420p',
+            '-an',
+            '-fs',
+            '10500000',
+            '-movflags',
+            '+faststart',
+            proxyPath,
+          ],
+          { timeout: 65000 }
+        );
+        const pStat = await fs.promises.stat(proxyPath).catch(() => null);
+        if (pStat && pStat.size > 1000) {
+          proxyReady = true;
+        }
+      } catch (proxyErr) {
+        console.warn('ffmpeg proxy creation warning:', proxyErr);
+        await fs.promises.unlink(proxyPath).catch(() => {});
+      }
+    }
+
+    return res.json({
+      proxyId: proxyReady ? uploadId : undefined,
+      frames,
+      previewFrame: frames[1] || frames[0] || '',
+      meta: {
+        width: width || undefined,
+        height: height || undefined,
+        durationSec: durationSec || undefined,
+        orientation,
+        hasStoryboard: frames.length > 0,
+        hasDirectVideo: proxyReady,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Video preparation failed.' });
+  } finally {
+    await fs.promises.unlink(inputPath).catch(() => {});
+  }
+});
+
 // Endpoint: Generate metadata for an asset
 app.post('/api/generate-metadata', async (req: Request, res: Response) => {
+  let activeProxyPath: string | null = null;
   try {
     const {
       filename,
       fileType,
-      imageData, // base64 optional
+      imageData, // base64 image or video storyboard
+      videoData, // optional base64 video file (<=14MB) for Gemini native video inspection
+      videoProxyId, // optional server-prepared compact 480p proxy MP4 ID (for 30-250MB files & ProRes MOV)
+      mediaContext, // optional { width, height, durationSec, orientation, hasDirectVideo, hasStoryboard }
       aiProvider = 'Google Gemini',
       model,
       marketplace = 'Adobe Stock',
@@ -662,28 +857,26 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
     const keyCandidates: string[] = [];
     if (Array.isArray(apiKeys) && apiKeys.length > 0) {
       apiKeys.forEach((k) => {
-        if (typeof k === 'string' && k.trim().length > 5 && !knownInvalidKeys.has(k.trim()) && !keyCandidates.includes(k.trim())) {
+        if (typeof k === 'string' && k.trim().length > 5 && !keyCandidates.includes(k.trim())) {
           keyCandidates.push(k.trim());
         }
       });
     }
-    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !knownInvalidKeys.has(userKey.trim()) && !keyCandidates.includes(userKey.trim())) {
+    if (userKey && typeof userKey === 'string' && userKey.trim().length > 5 && !keyCandidates.includes(userKey.trim())) {
       keyCandidates.push(userKey.trim());
     }
-    for (const poolKey of globalServerKeyPool) {
-      if (!knownInvalidKeys.has(poolKey) && !keyCandidates.includes(poolKey)) {
-        keyCandidates.push(poolKey);
-      }
-    }
-    if (process.env.GEMINI_API_KEY && !knownInvalidKeys.has(process.env.GEMINI_API_KEY.trim()) && !keyCandidates.includes(process.env.GEMINI_API_KEY.trim())) {
-      keyCandidates.push(process.env.GEMINI_API_KEY.trim());
+    if (keyCandidates.length === 0) {
+      return res.status(401).json({
+        error: 'No valid API Key provided. Please add your Google Gemini or Groq API Key.',
+      });
     }
 
     // All supported active Gemini models
     const allGeminiModels = [
-      'gemini-2.5-flash',
-      'gemini-3.8-flash',
+      'gemini-4-hydrogen',
       'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-4-neon',
       'gemini-3.1-pro-preview',
     ];
 
@@ -697,11 +890,154 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
       }
     }
 
-    // Iterate through key candidates (Key Rotation & Auto-Fallback)
+    let serverProxyVideoDataUrl = '';
+    if (isValidPrepId(videoProxyId)) {
+      const candidatePath = path.join(VIDEO_PREP_DIR, `${videoProxyId}_proxy.mp4`);
+      try {
+        const proxyBuf = await fs.promises.readFile(candidatePath);
+        if (proxyBuf.length > 1000) {
+          serverProxyVideoDataUrl = `data:video/mp4;base64,${proxyBuf.toString('base64')}`;
+          activeProxyPath = candidatePath;
+        }
+      } catch {}
+    }
+
+    let lastApiErrorMessage = 'AI metadata generation failed.';
+    let lastHttpStatus = 502;
+
+    // Iterate through this user's own key candidates (Per-Session Rotation)
     for (let keyIdx = 0; keyIdx < keyCandidates.length; keyIdx++) {
       const clientKey = keyCandidates[keyIdx];
-      if (knownInvalidKeys.has(clientKey)) continue;
+      const useGroq = aiProvider === 'Groq Cloud' || clientKey.startsWith('gsk_');
 
+      const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
+      const hasVisualData = Boolean(imageData && typeof imageData === 'string' && imageData.includes('base64') && !imageData.startsWith('data:image/svg+xml'));
+      const effectiveVideoData = !useGroq ? (videoData || serverProxyVideoDataUrl) : '';
+      const hasDirectVideo = Boolean(effectiveVideoData && typeof effectiveVideoData === 'string' && effectiveVideoData.includes('base64') && effectiveVideoData.startsWith('data:video/'));
+
+      const typedMediaContext = mediaContext as MediaInspectionMeta | undefined;
+      const effectiveVideoMeta: MediaInspectionMeta | undefined = typedMediaContext
+        ? { ...typedMediaContext, hasDirectVideo }
+        : undefined;
+      const videoDirective = getVideoSeoDirective(effectiveVideoMeta, fileType);
+      const imageFramingNote =
+        fileType !== 'video' && typedMediaContext?.width && typedMediaContext?.height
+          ? `- Technical Framing: ${typedMediaContext.width}x${typedMediaContext.height}px (${typedMediaContext.orientation || 'horizontal'}).\n`
+          : '';
+
+      const promptText = `
+${profile.systemPrompt}
+
+TASK (100% VISUAL ACCURACY MANDATE):
+${hasDirectVideo
+  ? `Watch the attached video clip from start to finish and describe PRECISELY what happens across the clip (subjects, motion, camera movement, setting, lighting) with ZERO guesswork. DO NOT rely on meaningless filenames like "${filename}".`
+  : hasVisualData
+  ? fileType === 'video'
+    ? `Inspect the provided 4-frame chronological video storyboard (15%, 40%, 65%, 85% timestamps) and describe PRECISELY the subject, action progression, camera motion, lighting, and setting with ZERO guesswork. DO NOT rely on meaningless filenames like "${filename}".`
+    : `Inspect the provided image directly and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions. DO NOT rely on meaningless filenames like "${filename}" or camera numbers like "121 (46).jpg".`
+  : `No raster preview could be extracted for "${filename}" (${fileType}). Base metadata ONLY on clear factual words in filename/topic/instructions without inventing unrelated scenes.`
+}
+${videoDirective}${imageFramingNote}
+ADDITIONAL ASSET PARAMETERS:
+${advanceIsolatedTransparent ? `- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include ${marketplace === 'Adobe Stock' ? '"transparent", "background", "isolated", "cutout"' : '"transparent background", "isolated", "cut out"'}.` : ''}
+${advanceIsolatedWhite ? `- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include ${marketplace === 'Adobe Stock' ? '"white", "background", "isolated", "studio"' : '"white background", "isolated", "studio shot"'}.` : ''}
+${advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
+${advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
+${includeConceptualKeywords ? `
+- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
+Analyze the underlying mood, emotional resonance, and commercial message (e.g. "hope", "future", "innovation", "growth", "wellbeing", "sustainability").
+Include those 3-5 top conceptual/abstract keywords inside the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
+- Description: ${descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : marketplace === 'Shutterstock' ? `Rich, complete, searchable Shutterstock title-sentence strictly within ${Math.max(120, descLength)} characters (max 200 chars).` : `Concise, natural commercial description sentence under ${descLength} characters (never mid-word).`}
+- Category & Topic: Pick ONE exact official ${marketplace} category plus concise 2-3 word subject topic.
+
+${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${customPrompt.trim()}` : ''}
+`;
+
+      // --- BRANCH A: GROQ CLOUD ---
+      if (useGroq) {
+        const groqModel =
+          model && !model.startsWith('gemini-')
+            ? model.trim()
+            : 'meta-llama/llama-4-scout-17b-16e-instruct';
+        try {
+          const userContent: any[] = [];
+          if (hasVisualData) {
+            userContent.push({
+              type: 'image_url',
+              image_url: { url: imageData },
+            });
+          }
+          userContent.push({
+            type: 'text',
+            text: `${promptText}\nOutput ONLY valid JSON matching: {"title":"...","topic":"...","description":"...","keywords":["..."],"conceptualKeywords":["..."],"category":"..."}`,
+          });
+
+          const groqResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${clientKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: [{ role: 'user', content: userContent }],
+              temperature: 0.2,
+              max_tokens: 1024,
+              response_format: { type: 'json_object' },
+            }),
+          });
+
+          const groqData: any = await groqResp.json().catch(() => ({}));
+          if (!groqResp.ok) {
+            lastHttpStatus = groqResp.status;
+            lastApiErrorMessage = groqData?.error?.message || `Groq API HTTP ${groqResp.status}`;
+            if (groqResp.status === 401 || groqResp.status === 403) continue;
+            if (groqResp.status === 429 && keyIdx < keyCandidates.length - 1) {
+              await new Promise((r) => setTimeout(r, 2500));
+            }
+            continue;
+          }
+
+          const rawText = groqData?.choices?.[0]?.message?.content || '';
+          const parsed = parseAiJsonResponse(rawText);
+          if (parsed && (parsed.title || parsed.keywords)) {
+            let resTitle = sanitizeTitle((parsed.title || filename).trim());
+            if (titleLength > 0 && resTitle.length > titleLength) {
+              resTitle = truncateAtWordBoundary(resTitle.replace(/\.+$/, ''), titleLength - 1);
+              resTitle = sanitizeTitle(resTitle);
+            }
+
+            let resDesc = '';
+            if (descLength > 0 && parsed.description) {
+              resDesc = truncateAtWordBoundary(sanitizeTitle(parsed.description.trim()), descLength);
+            }
+
+            const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+            const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any);
+            const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
+              ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
+              : [];
+
+            return res.json({
+              title: resTitle,
+              rawTitle: parsed.title || resTitle,
+              topic: parsed.topic || parsed.category || category,
+              description: resDesc,
+              rawDescription: parsed.description || '',
+              keywords: resKeywords,
+              rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
+              conceptualKeywords,
+              category: normalizeCategoryForMarketplace(parsed.category || category, marketplace as any),
+              source: `Groq Cloud (${groqModel})`,
+            });
+          }
+        } catch (groqErr: any) {
+          lastApiErrorMessage = groqErr?.message || 'Groq Cloud request failed.';
+        }
+        continue;
+      }
+
+      // --- BRANCH B: GOOGLE GEMINI ---
       const genAiClient = new GoogleGenAI({
         apiKey: clientKey,
         httpOptions: {
@@ -716,32 +1052,19 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
       for (const targetModel of modelsToTry) {
         if (isKeyAuthFailure) break;
         try {
-          const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
-
-          const promptText = `
-${profile.systemPrompt}
-
-TASK (100% VISUAL ACCURACY MANDATE):
-Look directly at the provided image/asset and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions.
-DO NOT rely on meaningless filenames like "${filename}" or camera numbers like "121 (46).jpg". Inspect the actual visual objects, person, device, background, style, and colors!
-
-ADDITIONAL ASSET PARAMETERS:
-${advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include "transparent background", "isolated", "png", "cut out".' : ''}
-${advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
-${advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
-${advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
-${includeConceptualKeywords ? `
-- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
-In addition to physical visual objects, analyze the underlying mood, emotional resonance, and abstract commercial message of this image (e.g., for renewable energy: "hope", "future", "clean start", "innovation", "responsibility"; for corporate/business: "success", "teamwork", "leadership", "partnership", "growth"; for medical/wellness: "care", "vitality", "trust", "wellness").
-Identify exactly 3-5 top-matching conceptual/abstract keywords. Integrate them into the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
-- Description: ${descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : `Concise commercial description under ${descLength} characters.`}
-- Category & Topic: Provide the single best microstock category and subject topic name.
-
-${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${customPrompt.trim()}` : ''}
-`;
-
           const promptParts: any[] = [];
-          if (imageData && typeof imageData === 'string' && imageData.includes('base64')) {
+          if (hasDirectVideo && effectiveVideoData) {
+            const parts = effectiveVideoData.split(',');
+            const base64 = parts.length > 1 ? parts[1] : parts[0];
+            const mimeMatch = effectiveVideoData.match(/data:([^;]+);/);
+            const mimeType = mimeMatch ? mimeMatch[1] : 'video/mp4';
+            promptParts.push({
+              inlineData: {
+                mimeType,
+                data: base64,
+              },
+            });
+          } else if (hasVisualData) {
             const parts = imageData.split(',');
             const base64 = parts.length > 1 ? parts[1] : parts[0];
             const mimeMatch = imageData.match(/data:([^;]+);/);
@@ -755,39 +1078,49 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
           }
           promptParts.push({ text: promptText });
 
+          const isGemini4 = targetModel.startsWith('gemini-4');
+          const config: any = {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING, description: 'Accurate stock title' },
+                topic: { type: Type.STRING, description: 'Core subject matter (2-4 words)' },
+                description: { type: Type.STRING, description: 'Accurate commercial description sentence' },
+                keywords: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: 'Exact ranked commercial keywords ordered by descending relevance',
+                },
+                conceptualKeywords: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: '3-5 abstract, emotion, or commercial message keywords',
+                },
+                category: { type: Type.STRING, description: `Official ${marketplace} category name` },
+              },
+              required: ['title', 'topic', 'description', 'keywords', 'category'],
+            },
+          };
+
+          if (isGemini4) {
+            config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          } else {
+            config.temperature = 0.15;
+          }
+
           let response: any = null;
           try {
             response = await genAiClient.models.generateContent({
               model: targetModel,
               contents: promptParts,
-              config: {
-                temperature: 0.15,
-                maxOutputTokens: 2048,
-                responseMimeType: 'application/json',
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING, description: 'Accurate stock title' },
-                    topic: { type: Type.STRING, description: 'Core subject matter' },
-                    description: { type: Type.STRING, description: 'Accurate commercial description' },
-                    keywords: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                      description: 'Exact ranked keywords list',
-                    },
-                    conceptualKeywords: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                      description: '3-5 abstract, emotion, or commercial message keywords (e.g. hope, future, innovation)',
-                    },
-                    category: { type: Type.STRING, description: 'Best fitting stock category' },
-                  },
-                  required: ['title', 'topic', 'description', 'keywords', 'category'],
-                },
-              },
+              config,
             });
           } catch (modelCallErr: any) {
-            const errStr = (modelCallErr?.message || '').toLowerCase();
+            const errMsg = modelCallErr?.message || 'Gemini API call failed';
+            const errStr = errMsg.toLowerCase();
+            lastApiErrorMessage = errMsg;
+
             const isAuthError =
               errStr.includes('401') ||
               errStr.includes('unauthenticated') ||
@@ -797,9 +1130,9 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               errStr.includes('invalid authentication credentials');
 
             if (isAuthError) {
-              knownInvalidKeys.add(clientKey);
               isKeyAuthFailure = true;
-              console.info(`[Auth] Key #${keyIdx + 1} (${clientKey.slice(0, 6)}...) failed authentication. Skipping to next candidate.`);
+              lastHttpStatus = 401;
+              console.info(`[Auth] User key #${keyIdx + 1} failed authentication. Skipping to next candidate.`);
               break;
             }
 
@@ -810,6 +1143,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               errStr.includes('resource_exhausted');
 
             if (isRateLimit) {
+              lastHttpStatus = 429;
               console.info(`[Quota] Rate limit on ${targetModel}. Waiting 2.5s before fallback...`);
               await new Promise((r) => setTimeout(r, 2500));
             }
@@ -818,32 +1152,22 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
           if (response && response.text) {
             const parsed = parseAiJsonResponse(response.text);
             if (parsed && (parsed.title || parsed.keywords)) {
-              let rawTitle = (parsed.title || filename).trim();
+              const rawTitle = (parsed.title || filename).trim();
               let resTitle = sanitizeTitle(rawTitle);
 
               if (titleLength > 0 && resTitle.length > titleLength) {
-                const cut = resTitle.substring(0, titleLength);
-                const lastSpace = cut.lastIndexOf(' ');
-                resTitle = (lastSpace > titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-              }
-              resTitle = resTitle.replace(/[.,;:!?\s]+$/, '').trim();
-              if (resTitle.length > 0) {
-                resTitle = `${resTitle}.`;
+                resTitle = truncateAtWordBoundary(resTitle.replace(/\.+$/, ''), titleLength - 1);
+                resTitle = sanitizeTitle(resTitle);
               }
 
               let resDesc = '';
               if (descLength > 0 && parsed.description) {
-                resDesc = sanitizeTitle(parsed.description.trim());
-                if (resDesc.length > descLength) {
-                  const cut = resDesc.substring(0, descLength);
-                  const lastSpace = cut.lastIndexOf(' ');
-                  resDesc = (lastSpace > descLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-                }
+                resDesc = truncateAtWordBoundary(sanitizeTitle(parsed.description.trim()), descLength);
               }
 
-              let rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-              let resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30);
-              let conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
+              const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+              const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any);
+              const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
                 ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
                 : [];
 
@@ -856,13 +1180,13 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
                 keywords: resKeywords,
                 rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
                 conceptualKeywords,
-                category: parsed.category || category,
+                category: normalizeCategoryForMarketplace(parsed.category || category, marketplace as any),
                 source: `Google Gemini (${targetModel})`,
               });
             }
           }
-        } catch {
-          // Fall through to next model or key
+        } catch (outerErr: any) {
+          lastApiErrorMessage = outerErr?.message || lastApiErrorMessage;
         }
       }
 
@@ -871,35 +1195,19 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
       }
     }
 
-    // Fallback response if Gemini isn't configured or quota exceeded
-    const fallback = generateFallbackMetadata(
-      filename,
-      category,
-      marketplace,
-      keywordsCount,
-      titleLength,
-      descLength,
-      advanceVector,
-      advanceIllustration,
-      req.body?.topic || '',
-      includeConceptualKeywords
-    );
-    return res.json(fallback);
+    // Propagate actual API error instead of silently returning fake fallback metadata
+    return res.status(lastHttpStatus).json({
+      error: lastApiErrorMessage,
+    });
   } catch (err: any) {
     console.error('Error in generate metadata handler:', err);
-    const fallback = generateFallbackMetadata(
-      req.body?.filename || 'stock_asset.jpg',
-      req.body?.category || 'Business & Finance',
-      req.body?.marketplace || 'Adobe Stock',
-      req.body?.keywordsCount || 30,
-      req.body?.titleLength || 76,
-      req.body?.descLength || 120,
-      req.body?.advanceVector || false,
-      req.body?.advanceIllustration || false,
-      req.body?.topic || '',
-      req.body?.includeConceptualKeywords ?? true
-    );
-    return res.json(fallback);
+    return res.status(500).json({
+      error: err?.message || 'Internal metadata generation error.',
+    });
+  } finally {
+    if (activeProxyPath) {
+      await fs.promises.unlink(activeProxyPath).catch(() => {});
+    }
   }
 });
 
@@ -968,34 +1276,11 @@ app.get('/api/backup-project', async (req: Request, res: Response) => {
   }
 });
 
-// Keys pool endpoints
-app.get('/api/keys-pool', (req: Request, res: Response) => {
-  res.json({
-    count: globalServerKeyPool.length,
-    activeKeys: globalServerKeyPool.map((k) => (k.length > 8 ? `${k.slice(0, 4)}...${k.slice(-4)}` : '****')),
-  });
-});
-
-app.post('/api/keys-pool', (req: Request, res: Response) => {
-  const { apiKey } = req.body;
-  if (apiKey && typeof apiKey === 'string' && apiKey.trim().length > 8) {
-    const trimmed = apiKey.trim();
-    if (!globalServerKeyPool.includes(trimmed)) {
-      globalServerKeyPool.push(trimmed);
-    }
-    return res.json({ success: true, count: globalServerKeyPool.length });
-  }
-  return res.status(400).json({ error: 'Invalid API key' });
-});
-
 // API health check
 app.get('/api/health', (req: Request, res: Response) => {
-  const envKey = process.env.GEMINI_API_KEY?.trim();
-  const envKeyValid = Boolean(envKey) && !knownInvalidKeys.has(envKey);
-  const activePoolKeys = globalServerKeyPool.filter((k) => !knownInvalidKeys.has(k));
   res.json({
     status: 'ok',
-    hasGeminiKey: envKeyValid || activePoolKeys.length > 0,
+    hasGeminiKey: isEnvKeyValid,
     serverTime: new Date().toISOString(),
   });
 });
@@ -1004,7 +1289,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -1016,7 +1301,8 @@ async function startServer() {
     });
   }
 
-  const PORT = Number(process.env.PORT) || 3000;
+  // Runtime environment requires port 3000
+  const PORT = 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
   });

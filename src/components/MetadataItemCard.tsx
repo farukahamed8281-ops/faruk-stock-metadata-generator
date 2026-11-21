@@ -17,8 +17,13 @@ import {
   UserCheck,
   User,
 } from 'lucide-react';
-import { StockAsset } from '../types';
+import { StockAsset, Marketplace } from '../types';
 import { generateRenamedFilename } from '../utils/zipExporter';
+import {
+  OFFICIAL_ADOBE_CATEGORIES,
+  OFFICIAL_SHUTTERSTOCK_CATEGORIES,
+  normalizeCategoryForMarketplace,
+} from '../utils/stockSeoSanitizer';
 
 interface MetadataItemCardProps {
   asset: StockAsset;
@@ -28,7 +33,9 @@ interface MetadataItemCardProps {
   onCopyText: (text: string, label: string) => void;
   onGeneratePrompt?: (id: string) => void;
   onDownloadSingle?: (id: string) => void;
+  marketplace?: Marketplace;
   defaultAuthor?: string;
+  themeColor?: string;
 }
 
 export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
@@ -39,14 +46,24 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   onCopyText,
   onGeneratePrompt,
   onDownloadSingle,
+  marketplace,
   defaultAuthor,
+  themeColor = '#ff5533',
 }) => {
+  const activeMarketplace: Marketplace = asset.marketplace || marketplace || 'Adobe Stock';
+  const categoryOptions =
+    activeMarketplace === 'Shutterstock'
+      ? OFFICIAL_SHUTTERSTOCK_CATEGORIES
+      : OFFICIAL_ADOBE_CATEGORIES;
+  const normalizedCategory = normalizeCategoryForMarketplace(asset.category, activeMarketplace);
+
   const [isEditing, setIsEditing] = useState(false);
   const [showAdvanceToggles, setShowAdvanceToggles] = useState(false);
   const [showPromptDetails, setShowPromptDetails] = useState(false);
   const [selectedPromptEngine, setSelectedPromptEngine] = useState<'gemini' | 'flow' | 'midjourney' | 'flux' | 'dalle'>('gemini');
   const [editTitle, setEditTitle] = useState(asset.title);
   const [editTopic, setEditTopic] = useState(asset.topic || asset.category || '');
+  const [editCategory, setEditCategory] = useState(normalizedCategory);
   const [editAuthor, setEditAuthor] = useState(asset.author ?? defaultAuthor ?? '');
   const [editDesc, setEditDesc] = useState(asset.description);
   const [editKeywords, setEditKeywords] = useState((asset.keywords || []).join(', '));
@@ -57,16 +74,6 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
 
   // Helper to recompute title with per-file toggle states
   const recalculateTitle = (overrides: Partial<StockAsset>) => {
-    let raw = (asset.rawTitle || asset.title || asset.filename)
-      .replace(/\s*isolated on (transparent|white|black|dark|blue|grey|gray|green|red)\s*background/gi, '')
-      .replace(/\s*isolated on black ba\b/gi, '')
-      .replace(/\s*isolated on\s*$/gi, '')
-      .replace(/\s*isolated\s*$/gi, '')
-      .replace(/\s+Vector(\s+Illustration)?/gi, '')
-      .replace(/\s+Illustration/gi, '')
-      .replace(/\.[^/.]+$/, '')
-      .trim();
-
     const isTransparent = overrides.advanceIsolatedTransparent !== undefined 
       ? overrides.advanceIsolatedTransparent 
       : asset.advanceIsolatedTransparent;
@@ -88,6 +95,21 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
       : asset.advanceSuffixEnabled;
     const suffixText = overrides.advanceSuffix ?? asset.advanceSuffix ?? customSuffix;
 
+    let raw = (asset.rawTitle || asset.title || asset.filename)
+      .replace(/\s*isolated on (transparent|white|black|dark|blue|grey|gray|green|red)\s*background/gi, '')
+      .replace(/\s*isolated on black ba\b/gi, '')
+      .replace(/\s*isolated on\s*$/gi, '')
+      .replace(/\s*isolated\s*$/gi, '')
+      .replace(/\.[^/.]+$/, '')
+      .trim();
+
+    if (isVector) {
+      raw = raw.replace(/\s+Vector(\s+Illustration)?/gi, '').trim();
+    }
+    if (isIllustration) {
+      raw = raw.replace(/\s+Illustration/gi, '').trim();
+    }
+
     let title = raw;
 
     if (prefixEnabled && prefixText?.trim()) {
@@ -95,8 +117,8 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
     }
 
     const modifiers: string[] = [];
-    if (isVector) modifiers.push('Vector');
-    if (isIllustration) modifiers.push('Illustration');
+    if (isVector && !title.toLowerCase().includes('vector')) modifiers.push('Vector');
+    if (isIllustration && !title.toLowerCase().includes('illustration')) modifiers.push('Illustration');
     if (isTransparent) {
       modifiers.push('isolated on transparent background');
     } else if (isWhite) {
@@ -136,6 +158,17 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
     onUpdateAsset(asset.id, overrides);
   };
 
+  const handleStartEdit = () => {
+    setEditTitle(asset.title);
+    setEditTopic(asset.topic || asset.category || '');
+    setEditCategory(normalizeCategoryForMarketplace(asset.category, activeMarketplace));
+    setEditAuthor(asset.author ?? defaultAuthor ?? '');
+    setEditDesc(asset.description);
+    setEditKeywords((asset.keywords || []).join(', '));
+    setEditImagePrompt(asset.imagePrompt || asset.midjourneyPrompt || '');
+    setIsEditing(true);
+  };
+
   const handleSaveEdit = () => {
     const parsedKeywords = editKeywords
       .split(',')
@@ -153,6 +186,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
     onUpdateAsset(asset.id, {
       title: savedTitle,
       topic: editTopic,
+      category: normalizeCategoryForMarketplace(editCategory, activeMarketplace),
       description: editDesc,
       keywords: parsedKeywords,
       imagePrompt: editImagePrompt,
@@ -164,6 +198,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   const handleCancelEdit = () => {
     setEditTitle(asset.title);
     setEditTopic(asset.topic || asset.category || '');
+    setEditCategory(normalizeCategoryForMarketplace(asset.category, activeMarketplace));
     setEditAuthor(asset.author ?? defaultAuthor ?? '');
     setEditDesc(asset.description);
     setEditKeywords((asset.keywords || []).join(', '));
@@ -181,14 +216,14 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
     : asset.filename;
 
   return (
-    <div className="bg-[#1b1f28] border border-[#282f3d] rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:gap-5 shadow-md transition-all hover:border-[#353f52]">
+    <div className="bg-[#141720]/95 border border-[#252b38] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:gap-5 shadow-[0_4px_22px_rgba(0,0,0,0.45)] transition-all hover:border-orange-500/40 backdrop-blur-md">
       {/* Left Column: Square Thumbnail + Redo Button */}
       <div className="flex sm:flex-col items-center sm:items-stretch gap-3 shrink-0 sm:w-24">
         <div
-          className="w-20 sm:w-24 h-20 sm:h-24 rounded-lg bg-[#13161d] border border-[#2d3646] overflow-hidden flex items-center justify-center p-1 relative shadow-inner shrink-0"
+          className="w-20 sm:w-24 h-20 sm:h-24 rounded-lg bg-[#0f1218] border border-[#283040] overflow-hidden flex items-center justify-center p-1 relative shadow-inner shrink-0"
           style={{
             backgroundImage:
-              'radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)',
+              'radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px)',
             backgroundSize: '8px 8px',
           }}
         >
@@ -272,7 +307,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setIsEditing(!isEditing)}
+              onClick={() => (isEditing ? handleCancelEdit() : handleStartEdit())}
               className="text-gray-400 hover:text-orange-400 p-1.5 rounded hover:bg-[#252c3b] transition-colors cursor-pointer"
               title={isEditing ? 'Cancel Edit' : 'Edit Metadata'}
             >
@@ -389,15 +424,33 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                 className="w-full bg-[#12151c] border border-[#2d3546] rounded-md px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-orange-500"
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-semibold text-gray-400">Topic / Subject (Windows Details)</label>
-              <input
-                type="text"
-                value={editTopic}
-                onChange={(e) => setEditTopic(e.target.value)}
-                placeholder="e.g. Architectural Blueprint, Vintage Pattern"
-                className="w-full bg-[#12151c] border border-[#2d3546] rounded-md px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-orange-500"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-gray-400">
+                  Official {activeMarketplace === 'Shutterstock' ? 'Shutterstock' : 'Adobe Stock'} Category
+                </label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value)}
+                  className="w-full bg-[#12151c] border border-[#2d3546] rounded-md px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-orange-500 cursor-pointer"
+                >
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-gray-400">Topic / Subject (Windows Details)</label>
+                <input
+                  type="text"
+                  value={editTopic}
+                  onChange={(e) => setEditTopic(e.target.value)}
+                  placeholder="e.g. Architectural Blueprint, Vintage Pattern"
+                  className="w-full bg-[#12151c] border border-[#2d3546] rounded-md px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-orange-500"
+                />
+              </div>
             </div>
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
@@ -486,20 +539,29 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
               </div>
             </div>
 
-            {/* Topic / Subject & Author (Windows Details & IPTC Category) */}
+            {/* Topic / Subject, Official CSV Category & Author (Windows Details & IPTC Category) */}
             <div className="flex flex-col mb-2 bg-[#141720] border border-[#252d3c] rounded-lg p-2 gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-gray-400 font-medium flex items-center gap-1">
-                  <span>Topic / Subject:</span>
-                  <span className="text-orange-400 font-semibold">{asset.topic || asset.category || 'Stock Asset'}</span>
-                </span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                  <span className="text-gray-400 font-medium flex items-center gap-1">
+                    <span>Category:</span>
+                    <span className="text-emerald-400 font-semibold bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-700/40">
+                      {normalizedCategory}
+                    </span>
+                  </span>
+                  <span className="text-gray-600">•</span>
+                  <span className="text-gray-400 font-medium flex items-center gap-1">
+                    <span>Topic:</span>
+                    <span className="text-orange-400 font-semibold">{asset.topic || normalizedCategory || 'Stock Asset'}</span>
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-amber-400 font-medium bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/30">
                     ⭐⭐⭐⭐⭐ 5-Star EXIF Ready
                   </span>
                   <button
                     type="button"
-                    onClick={() => onCopyText(asset.topic || asset.category || '', 'Topic')}
+                    onClick={() => onCopyText(asset.topic || normalizedCategory || '', 'Topic')}
                     disabled={!asset.topic && !asset.category}
                     className="text-gray-400 hover:text-orange-400 p-0.5 rounded hover:bg-[#252c3b] transition-colors cursor-pointer"
                     title="Copy Topic"
@@ -624,18 +686,27 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                         key={idx}
                         className={`text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1 transition-all ${
                           isTop5
-                            ? 'bg-orange-500/15 text-orange-300 border border-orange-500/40 font-semibold shadow-sm'
+                            ? 'bg-orange-500/15 text-orange-300 border border-orange-500/45 font-semibold shadow-sm'
                             : isTop10
-                            ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30 font-medium'
-                            : 'bg-[#181d27] text-gray-300 border border-[#273042]'
+                            ? 'bg-amber-950/40 text-amber-300 border border-amber-500/30 font-medium'
+                            : 'bg-[#12151c] text-gray-300 border border-[#252b38]'
                         }`}
+                        style={
+                          isTop5
+                            ? {
+                                borderColor: `${themeColor}70`,
+                                backgroundColor: `${themeColor}1f`,
+                                color: '#ffad99',
+                              }
+                            : undefined
+                        }
                       >
                         <span className={`text-[9px] font-mono px-1 py-0.2 rounded ${
                           isTop5
-                            ? 'bg-orange-500/30 text-orange-200'
+                            ? 'bg-orange-500/25 text-orange-300'
                             : isTop10
                             ? 'bg-amber-500/20 text-amber-300'
-                            : 'text-gray-500'
+                            : 'text-gray-400'
                         }`}>
                           #{idx + 1}
                         </span>

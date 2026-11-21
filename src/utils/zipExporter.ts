@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { StockAsset, Marketplace } from '../types';
 import { injectMetadataIntoFile } from './metadataEmbedder';
+import { generateCsvContent } from './csvExporter';
 
 export interface ZipExportOptions {
   marketplace?: Marketplace;
@@ -78,66 +79,18 @@ export async function exportAssetsToZip(
     return asset.filename.replace(/\.[^/.]+$/, '') + '.' + cleanExt;
   };
 
-  // 1. Generate and add marketplace CSV file to ZIP
-  let csvContent = '';
-  const sanitize = (text: string = '') => {
-    const cleaned = (text || '').replace(/"/g, '""').trim();
-    return `"${cleaned}"`;
-  };
-
-  if (marketplace === 'Adobe Stock') {
-    csvContent += 'Filename,Title,Keywords,Category\n';
-    const rows = assets.map((asset) => {
-      const exportName = getExportFilename(asset);
-      const keywordsStr = (asset.keywords || []).join(', ');
-      return [
-        sanitize(exportName),
-        sanitize(asset.title || asset.filename),
-        sanitize(keywordsStr),
-        sanitize(asset.category || 'Graphic Resources'),
-      ].join(',');
+  // 1. Generate and add marketplace CSV file to ZIP (matching standalone CSV exporter & timestamped filenames if enabled)
+  let csvContent = generateCsvContent(assets, marketplace, targetExtension, autoRename);
+  if (includeTimestamp) {
+    assets.forEach((asset) => {
+      const noTs = autoRename && asset.title
+        ? generateRenamedFilename(asset.filename, asset.title, targetExtension, false)
+        : getExportFilename(asset);
+      const withTs = getExportFilename(asset);
+      if (noTs !== withTs) {
+        csvContent = csvContent.replace(`"${noTs}"`, `"${withTs}"`);
+      }
     });
-    csvContent += rows.join('\n');
-  } else if (marketplace === 'Shutterstock') {
-    csvContent += 'Filename,Description,Keywords,Categories\n';
-    const rows = assets.map((asset) => {
-      const exportName = getExportFilename(asset);
-      const keywordsStr = (asset.keywords || []).join(', ');
-      return [
-        sanitize(exportName),
-        sanitize(asset.description || asset.title || asset.filename),
-        sanitize(keywordsStr),
-        sanitize(asset.category || 'Abstract'),
-      ].join(',');
-    });
-    csvContent += rows.join('\n');
-  } else if (marketplace === 'Magnific') {
-    csvContent += 'Filename,Title,Tags\n';
-    const rows = assets.map((asset) => {
-      const exportName = getExportFilename(asset);
-      const tagsStr = (asset.keywords || []).map((k) => k.toLowerCase()).join(',');
-      return [
-        sanitize(exportName),
-        sanitize(asset.title || asset.filename),
-        sanitize(tagsStr),
-      ].join(',');
-    });
-    csvContent += rows.join('\n');
-  } else {
-    csvContent += 'Filename,Title,Description,Keywords,Category,Topic\n';
-    const rows = assets.map((asset) => {
-      const exportName = getExportFilename(asset);
-      const keywordsStr = (asset.keywords || []).join(', ');
-      return [
-        sanitize(exportName),
-        sanitize(asset.title),
-        sanitize(asset.description),
-        sanitize(keywordsStr),
-        sanitize(asset.category || 'General'),
-        sanitize(asset.topic || defaultTopic),
-      ].join(',');
-    });
-    csvContent += rows.join('\n');
   }
 
   const csvName = `${marketplace.toLowerCase().replace(/\s+/g, '_')}_metadata.csv`;

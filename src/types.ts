@@ -100,6 +100,7 @@ export interface GenerationSettings {
   offlineModeEnabled?: boolean; // No API key required - runs on Smart SEO Heuristic Engine
   adobeTop10Priority?: boolean; // Sorts & highlights the top 5-10 keywords for Adobe Stock algorithm ranking
   includeConceptualKeywords?: boolean; // Injects 3-5 top abstract emotional / commercial message keywords (e.g. hope, future, innovation)
+  deepVideoProxy?: boolean; // Uploads >14MB videos (30-250MB) in 6MB chunks to server ffmpeg to inspect full motion video + ProRes .mov
 
   // Image to Prompt Settings
   targetPromptGenerator: 'midjourney' | 'flux' | 'dalle' | 'gemini' | 'flow' | 'firefly' | 'universal';
@@ -115,3 +116,4 @@ export interface BatchHistoryRecord {
   marketplace: Marketplace;
   assets: StockAsset[];
 }
+

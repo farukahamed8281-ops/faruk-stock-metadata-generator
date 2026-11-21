@@ -1,52 +1,199 @@
 import { StockAsset, Marketplace, GenerationSettings } from '../types';
-import { getMarketplaceSeoProfile } from '../utils/marketplacePrompts';
-import { sanitizeTitle, alignKeywordsWithTitle } from '../utils/stockSeoSanitizer';
+import {
+  getMarketplaceSeoProfile,
+  getVideoSeoDirective,
+  MediaInspectionMeta,
+} from '../utils/marketplacePrompts';
+import {
+  sanitizeTitle,
+  alignKeywordsWithTitle,
+  normalizeCategoryForMarketplace,
+  truncateAtWordBoundary,
+} from '../utils/stockSeoSanitizer';
 
-// Fast high-fidelity thumbnail converter: 800px JPEG/PNG (~20-40KB) for instant network upload & accurate AI vision analysis
+function drawImageOnWhiteCanvas(img: HTMLImageElement, maxDim = 800, mime: 'image/jpeg' | 'image/png' = 'image/jpeg'): string {
+  let width = img.naturalWidth || img.width || maxDim;
+  let height = img.naturalHeight || img.height || maxDim;
+  if (width === 0 || height === 0) {
+    width = maxDim;
+    height = maxDim;
+  }
+  if (width > maxDim || height > maxDim) {
+    if (width > height) {
+      height = Math.round((height * maxDim) / width);
+      width = maxDim;
+    } else {
+      width = Math.round((width * maxDim) / height);
+      height = maxDim;
+    }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  // White backdrop ensures dark transparent PNG/SVG vectors remain clearly visible to AI Vision
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+  return mime === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85);
+}
+
+// Extract embedded JPEG preview from Adobe Illustrator (.ai/.eps) files if present
+async function extractEmbeddedVectorPreview(file: File): Promise<string> {
+  try {
+    const sliceSize = Math.min(file.size, 6 * 1024 * 1024);
+    const buffer = await file.slice(0, sliceSize).arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let start = -1;
+    for (let i = 0; i < bytes.length - 3; i++) {
+      if (bytes[i] === 0xff && bytes[i + 1] === 0xd8 && bytes[i + 2] === 0xff && (bytes[i + 3] === 0xe0 || bytes[i + 3] === 0xe1 || bytes[i + 3] === 0xdb)) {
+        start = i;
+        break;
+      }
+    }
+    if (start === -1) return '';
+    let end = -1;
+    for (let i = start + 512; i < bytes.length - 1; i++) {
+      if (bytes[i] === 0xff && bytes[i + 1] === 0xd9) {
+        end = i + 2;
+        if (end - start >= 2048) break;
+      }
+    }
+    if (end === -1 || end - start < 2048) return '';
+    const jpgBlob = new Blob([bytes.slice(start, end)], { type: 'image/jpeg' });
+    const objUrl = URL.createObjectURL(jpgBlob);
+    return await new Promise<string>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const out = drawImageOnWhiteCanvas(img, 800, 'image/jpeg');
+        URL.revokeObjectURL(objUrl);
+        resolve(out);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        resolve('');
+      };
+      img.src = objUrl;
+    });
+  } catch {
+    return '';
+  }
+}
+
+// Fast high-fidelity thumbnail converter supporting Raster Images, SVG Vectors (rasterized to PNG), Videos (frame capture), and EPS/AI (embedded preview)
 export const fileToFastThumbnail = (file: File): Promise<string> => {
   return new Promise((resolve) => {
     if (!file) {
       resolve('');
       return;
     }
-    // Handle SVG directly
-    if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve((e.target?.result as string) || '');
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
+
+    const lowerName = file.name.toLowerCase();
+
+    // 1. Rasterize SVG onto an 800px white-backed PNG so Gemini/Groq Vision can actually see vector artwork
+    if (file.type === 'image/svg+xml' || lowerName.endsWith('.svg')) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const pngData = drawImageOnWhiteCanvas(img, 800, 'image/png');
+        URL.revokeObjectURL(url);
+        resolve(pngData);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve('');
+      };
+      img.src = url;
       return;
     }
+
+    // 2. Capture representative video frame onto 800px JPEG for Vision analysis
+    if (file.type.startsWith('video/') || /\.(mp4|mov|webm|avi)$/i.test(lowerName)) {
+      const url = URL.createObjectURL(file);
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      let settled = false;
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
+      };
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          resolve('');
+        }
+      }, 6000);
+
+      video.onloadedmetadata = () => {
+        const dur = video.duration && isFinite(video.duration) && video.duration > 0.2 ? video.duration : 0.5;
+        const seekTime = Math.min(Math.max(0.15, dur * 0.4), Math.max(0.15, dur - 0.05));
+        video.currentTime = seekTime;
+      };
+      video.onseeked = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          const canvas = document.createElement('canvas');
+          const maxDim = 800;
+          let width = video.videoWidth || 800;
+          let height = video.videoHeight || 450;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            cleanup();
+            resolve(dataUrl);
+            return;
+          }
+        } catch {}
+        cleanup();
+        resolve('');
+      };
+      video.onerror = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          cleanup();
+          resolve('');
+        }
+      };
+      video.src = url;
+      return;
+    }
+
+    // 3. Extract embedded JPEG preview from EPS / AI if available
+    if (/\.(eps|ai)$/i.test(lowerName) || file.type.includes('postscript')) {
+      extractEmbeddedVectorPreview(file).then(resolve).catch(() => resolve(''));
+      return;
+    }
+
+    // 4. Standard raster images (JPG, PNG, WebP, GIF, etc.)
     if (!file.type.startsWith('image/')) {
       resolve('');
       return;
     }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        const maxDim = 800;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
-        } else {
-          resolve((e.target?.result as string) || '');
-        }
+        const dataUrl = drawImageOnWhiteCanvas(img, 800, 'image/jpeg');
+        resolve(dataUrl || (e.target?.result as string) || '');
       };
       img.onerror = () => resolve((e.target?.result as string) || '');
       img.src = e.target?.result as string;
@@ -56,14 +203,443 @@ export const fileToFastThumbnail = (file: File): Promise<string> => {
   });
 };
 
+const MAX_DIRECT_VIDEO_BYTES = 14 * 1024 * 1024; // 14MB raw (~19MB base64 inlineData safe limit)
+const CHUNKED_PROXY_MAX_BYTES = 250 * 1024 * 1024; // 250MB max via 6MB chunked server ffmpeg proxy
+const VIDEO_CHUNK_SIZE = 6 * 1024 * 1024; // 6MB slices (well under Cloud Run 32MB request cap)
+
+function getNormalizedVideoMime(file: File): string {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith('.mov')) return 'video/quicktime';
+  if (lower.endsWith('.webm')) return 'video/webm';
+  if (lower.endsWith('.avi')) return 'video/x-msvideo';
+  if (lower.endsWith('.mkv')) return 'video/x-matroska';
+  if (lower.endsWith('.mp4') || lower.endsWith('.m4v')) return 'video/mp4';
+  if (file.type && file.type.startsWith('video/')) return file.type;
+  return 'video/mp4';
+}
+
+function fileToVideoDataUrl(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = typeof reader.result === 'string' ? reader.result : '';
+      if (!raw.includes(';base64,')) {
+        resolve('');
+        return;
+      }
+      const b64 = raw.split(';base64,')[1];
+      const normalizedMime = getNormalizedVideoMime(file);
+      resolve(b64 ? `data:${normalizedMime};base64,${b64}` : '');
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
+function extractImageMetaFromFile(file: File): Promise<MediaInspectionMeta> {
+  return new Promise((resolve) => {
+    if (!file || !file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+      resolve({});
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const width = img.naturalWidth || img.width || 0;
+      const height = img.naturalHeight || img.height || 0;
+      URL.revokeObjectURL(url);
+      if (!width || !height) {
+        resolve({});
+        return;
+      }
+      const orientation: MediaInspectionMeta['orientation'] =
+        width > height * 1.05 ? 'horizontal' : height > width * 1.05 ? 'vertical' : 'square';
+      resolve({ width, height, orientation });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({});
+    };
+    img.src = url;
+  });
+}
+
+// Extracts a 2x2 chronological storyboard (15%, 40%, 65%, 85%) plus natural resolution & duration metadata
+async function extractVideoStoryboardAndMeta(
+  file: File
+): Promise<{ storyboardDataUrl: string; meta: MediaInspectionMeta }> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    let settled = false;
+    const finish = (storyboardDataUrl: string, meta: MediaInspectionMeta) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyTimer);
+      URL.revokeObjectURL(url);
+      resolve({ storyboardDataUrl, meta });
+    };
+
+    const safetyTimer = setTimeout(() => {
+      finish('', {});
+    }, 10000);
+
+    const drawQuadrantBadge = (
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      label: string
+    ) => {
+      ctx.save();
+      ctx.font = 'bold 13px sans-serif';
+      const padX = 8;
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(11, 13, 18, 0.82)';
+      ctx.fillRect(x + 8, y + 8, textW + padX * 2, 22);
+      ctx.fillStyle = '#ff7744';
+      ctx.fillRect(x + 8, y + 8, 3, 22);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, x + 8 + padX, y + 23);
+      ctx.restore();
+    };
+
+    video.onloadedmetadata = async () => {
+      const width = video.videoWidth || 1280;
+      const height = video.videoHeight || 720;
+      const duration = isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+      const orientation: MediaInspectionMeta['orientation'] =
+        width > height * 1.05 ? 'horizontal' : height > width * 1.05 ? 'vertical' : 'square';
+
+      const baseMeta: MediaInspectionMeta = {
+        width,
+        height,
+        durationSec: duration || undefined,
+        orientation,
+        hasStoryboard: false,
+      };
+
+      try {
+        const aspect = width / Math.max(1, height);
+        const tileW = aspect >= 1 ? 480 : Math.max(240, Math.round(360 * aspect));
+        const tileH = Math.max(200, Math.round(tileW / aspect));
+
+        const positions = [
+          { pct: 0.15, label: '15% START' },
+          { pct: 0.40, label: '40% EARLY' },
+          { pct: 0.65, label: '65% MID-LATE' },
+          { pct: 0.85, label: '85% END' },
+        ];
+
+        const canvas = document.createElement('canvas');
+        canvas.width = tileW * 2;
+        canvas.height = tileH * 2;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          finish('', baseMeta);
+          return;
+        }
+
+        ctx.fillStyle = '#0b0d12';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const seekTo = (t: number) =>
+          new Promise<void>((res) => {
+            if (settled) {
+              res();
+              return;
+            }
+            let done = false;
+            const onSeeked = () => {
+              if (done) return;
+              done = true;
+              video.removeEventListener('seeked', onSeeked);
+              res();
+            };
+            video.addEventListener('seeked', onSeeked);
+            setTimeout(() => {
+              if (!done) {
+                done = true;
+                video.removeEventListener('seeked', onSeeked);
+                res();
+              }
+            }, 1800);
+            try {
+              video.currentTime = t;
+            } catch {
+              onSeeked();
+            }
+          });
+
+        let captured = 0;
+        for (let i = 0; i < positions.length; i++) {
+          if (settled) break;
+          const pos = positions[i];
+          const targetSec =
+            duration > 0.25
+              ? Math.min(Math.max(0.05, duration * pos.pct), Math.max(0.08, duration - 0.05))
+              : 0.1;
+          await seekTo(targetSec);
+          const col = i % 2;
+          const row = Math.floor(i / 2);
+          const x = col * tileW;
+          const y = row * tileH;
+          try {
+            ctx.drawImage(video, x, y, tileW, tileH);
+            drawQuadrantBadge(ctx, x, y, pos.label);
+            captured++;
+          } catch {}
+        }
+
+        if (captured === 0) {
+          finish('', baseMeta);
+          return;
+        }
+
+        const storyboardDataUrl = canvas.toDataURL('image/jpeg', 0.84);
+        finish(storyboardDataUrl, { ...baseMeta, hasStoryboard: true });
+      } catch {
+        finish('', baseMeta);
+      }
+    };
+
+    video.onerror = () => {
+      finish('', {});
+    };
+
+    video.src = url;
+  });
+}
+
+async function composeStoryboardFromDataUrls(frameUrls: string[]): Promise<string> {
+  if (!frameUrls || frameUrls.length === 0) return '';
+  const loadImg = (src: string) =>
+    new Promise<HTMLImageElement | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+
+  const imgs = (await Promise.all(frameUrls.slice(0, 4).map(loadImg))).filter(Boolean) as HTMLImageElement[];
+  if (imgs.length === 0) return '';
+
+  const firstW = imgs[0].naturalWidth || 640;
+  const firstH = imgs[0].naturalHeight || 360;
+  const aspect = firstW / Math.max(1, firstH);
+  const tileW = aspect >= 1 ? 480 : Math.max(240, Math.round(360 * aspect));
+  const tileH = Math.max(200, Math.round(tileW / aspect));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = tileW * 2;
+  canvas.height = tileH * 2;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return frameUrls[0];
+
+  ctx.fillStyle = '#0b0d12';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const labels = ['15% START', '40% EARLY', '65% MID-LATE', '85% END'];
+  for (let i = 0; i < imgs.length; i++) {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = col * tileW;
+    const y = row * tileH;
+    ctx.drawImage(imgs[i], x, y, tileW, tileH);
+
+    ctx.save();
+    ctx.font = 'bold 13px sans-serif';
+    const textW = ctx.measureText(labels[i] || `FRAME ${i + 1}`).width;
+    ctx.fillStyle = 'rgba(11, 13, 18, 0.82)';
+    ctx.fillRect(x + 8, y + 8, textW + 16, 22);
+    ctx.fillStyle = '#ff7744';
+    ctx.fillRect(x + 8, y + 8, 3, 22);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(labels[i] || `FRAME ${i + 1}`, x + 16, y + 23);
+    ctx.restore();
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.84);
+}
+
+async function prepareServerVideoProxy(
+  file: File,
+  createMotionProxy: boolean
+): Promise<{
+  proxyId?: string;
+  storyboardDataUrl: string;
+  previewFrame?: string;
+  meta: MediaInspectionMeta;
+} | null> {
+  if (!file || file.size <= 0 || file.size > CHUNKED_PROXY_MAX_BYTES) {
+    return null;
+  }
+
+  try {
+    const uploadId = `vid_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const totalChunks = Math.max(1, Math.ceil(file.size / VIDEO_CHUNK_SIZE));
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * VIDEO_CHUNK_SIZE;
+      const end = Math.min(file.size, start + VIDEO_CHUNK_SIZE);
+      const chunkSlice = file.slice(start, end);
+      const chunkResp = await fetch('/api/video-prepare/chunk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-Upload-Id': uploadId,
+          'X-Chunk-Index': String(i),
+        },
+        body: chunkSlice,
+      });
+      if (!chunkResp.ok) {
+        return null;
+      }
+    }
+
+    const finalizeResp = await fetch('/api/video-prepare/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uploadId,
+        filename: file.name,
+        totalChunks,
+        createMotionProxy,
+      }),
+    });
+
+    if (!finalizeResp.ok) return null;
+    const data = await finalizeResp.json();
+    const frames: string[] = Array.isArray(data.frames) ? data.frames : [];
+    const storyboardDataUrl = await composeStoryboardFromDataUrls(frames);
+
+    return {
+      proxyId: data.proxyId,
+      storyboardDataUrl,
+      previewFrame: data.previewFrame || frames[0] || '',
+      meta: data.meta || {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function prepareMediaPayload(
+  asset: StockAsset,
+  preferDirectVideo: boolean,
+  deepVideoProxy: boolean
+): Promise<{
+  imageData: string;
+  videoData?: string;
+  videoProxyId?: string;
+  resolvedPreviewUrl?: string;
+  mediaContext?: MediaInspectionMeta;
+}> {
+  const isVideo =
+    asset.fileType === 'video' ||
+    Boolean(asset.file?.type.startsWith('video/')) ||
+    /\.(mp4|mov|webm|avi|mkv)$/i.test(asset.filename);
+
+  if (isVideo && asset.file) {
+    // 1. Always try ultra-fast local browser <video> storyboard first (0MB upload!)
+    const localResult = await extractVideoStoryboardAndMeta(asset.file);
+    let storyboardDataUrl = localResult.storyboardDataUrl;
+    let meta: MediaInspectionMeta = { ...localResult.meta };
+    let videoData: string | undefined;
+    let videoProxyId: string | undefined;
+    let resolvedPreviewUrl: string | undefined;
+
+    if (preferDirectVideo && asset.file.size > 0 && asset.file.size <= MAX_DIRECT_VIDEO_BYTES) {
+      // Case A: Small/medium clip (<=14MB) -> send raw video stream directly to Gemini
+      const encodedVideo = await fileToVideoDataUrl(asset.file);
+      if (encodedVideo) {
+        videoData = encodedVideo;
+        meta.hasDirectVideo = true;
+      }
+    } else if (!storyboardDataUrl || (preferDirectVideo && deepVideoProxy)) {
+      // Case B: Larger clip (30-250MB H.264 MP4/MOV) with Full Video Stream enabled, OR ProRes/HEVC MOV unreadable by browser
+      const serverPrep = await prepareServerVideoProxy(asset.file, preferDirectVideo);
+      if (serverPrep) {
+        if (!storyboardDataUrl && serverPrep.storyboardDataUrl) {
+          storyboardDataUrl = serverPrep.storyboardDataUrl;
+        }
+        if (serverPrep.previewFrame && !asset.previewUrl) {
+          resolvedPreviewUrl = serverPrep.previewFrame;
+        }
+        if (serverPrep.proxyId) {
+          videoProxyId = serverPrep.proxyId;
+        }
+        meta = {
+          ...meta,
+          width: meta.width || serverPrep.meta.width,
+          height: meta.height || serverPrep.meta.height,
+          durationSec: meta.durationSec || serverPrep.meta.durationSec,
+          orientation: meta.orientation || serverPrep.meta.orientation,
+          hasStoryboard: Boolean(storyboardDataUrl) || Boolean(serverPrep.meta.hasStoryboard),
+          hasDirectVideo: Boolean(serverPrep.proxyId),
+        };
+      }
+    }
+
+    let fallbackImageData = storyboardDataUrl;
+    if (!fallbackImageData && asset.previewUrl && asset.previewUrl.startsWith('data:image/')) {
+      fallbackImageData = asset.previewUrl;
+    }
+
+    return {
+      imageData: fallbackImageData,
+      videoData,
+      videoProxyId,
+      resolvedPreviewUrl,
+      mediaContext: meta,
+    };
+  }
+
+  let imageData = '';
+  let mediaContext: MediaInspectionMeta | undefined;
+
+  if (asset.file) {
+    try {
+      const [thumb, imgMeta] = await Promise.all([
+        fileToFastThumbnail(asset.file),
+        extractImageMetaFromFile(asset.file),
+      ]);
+      imageData = thumb;
+      if (imgMeta.width && imgMeta.height) {
+        mediaContext = imgMeta;
+      }
+    } catch (e) {
+      console.warn('Fast thumbnail conversion warning:', e);
+    }
+  } else if (asset.previewUrl) {
+    try {
+      if (asset.previewUrl.startsWith('data:image/') && !asset.previewUrl.startsWith('data:image/svg+xml')) {
+        imageData = asset.previewUrl;
+      } else if (asset.previewUrl.startsWith('blob:')) {
+        const resp = await fetch(asset.previewUrl);
+        const blob = await resp.blob();
+        if (blob) {
+          imageData = await fileToFastThumbnail(new File([blob], asset.filename, { type: blob.type }));
+        }
+      }
+    } catch (e) {
+      console.warn('PreviewURL thumbnail conversion warning:', e);
+    }
+  }
+
+  return { imageData, mediaContext };
+}
+
 // Clean JSON response from LLM
 function extractJson(text: string): any {
   if (!text) return null;
   try {
     return JSON.parse(text);
   } catch {}
-  
-  // Try markdown code block extraction
+
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (jsonMatch && jsonMatch[1]) {
     try {
@@ -71,7 +647,6 @@ function extractJson(text: string): any {
     } catch {}
   }
 
-  // Try finding the first { and last }
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -82,13 +657,16 @@ function extractJson(text: string): any {
   return null;
 }
 
-// Client-side Direct Gemini API Call (Supports Static Free Web Hosting like Netlify, Vercel, GitHub Pages)
+// Client-side Direct Gemini API Call (Fallback when backend is unavailable on static hosts)
 async function generateViaDirectGemini(
   apiKey: string,
   model: string | undefined,
   params: {
     filename: string;
+    fileType?: string;
     imageData?: string;
+    videoData?: string;
+    mediaContext?: MediaInspectionMeta;
     marketplace: Marketplace;
     titleLength: number;
     descLength: number;
@@ -102,12 +680,13 @@ async function generateViaDirectGemini(
     includeConceptualKeywords?: boolean;
   }
 ) {
-  const chosenModel = model && model.trim() ? model.trim() : 'gemini-2.5-flash';
+  const chosenModel = model && model.trim() ? model.trim() : 'gemini-4-hydrogen';
   const modelCandidates = [
     chosenModel,
-    'gemini-2.5-flash',
-    'gemini-3.8-flash',
+    'gemini-4-hydrogen',
     'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-4-neon',
     'gemini-3.1-pro-preview',
   ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
@@ -117,22 +696,45 @@ async function generateViaDirectGemini(
     params.keywordsCount
   );
 
+  const hasDirectVideo = Boolean(
+    params.videoData &&
+      params.videoData.includes('base64') &&
+      params.videoData.startsWith('data:video/')
+  );
+
+  const hasVisualData = Boolean(
+    params.imageData &&
+      params.imageData.includes('base64') &&
+      !params.imageData.startsWith('data:image/svg+xml')
+  );
+
+  const videoDirective = getVideoSeoDirective(params.mediaContext, params.fileType);
+  const imageFramingNote =
+    params.fileType !== 'video' && params.mediaContext?.width && params.mediaContext?.height
+      ? `- Technical Framing: ${params.mediaContext.width}x${params.mediaContext.height}px (${params.mediaContext.orientation || 'horizontal'}).\n`
+      : '';
+
   const promptText = `${profile.systemPrompt}
 
 TASK (100% VISUAL ACCURACY MANDATE):
-Look directly at the provided image/asset and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions.
-DO NOT rely on meaningless filenames like "${params.filename}" or camera numbers like "121 (46).jpg". Inspect the actual visual objects, person, device, background, style, and colors!
-
+${hasDirectVideo
+  ? `Watch the provided video file from start to end and describe PRECISELY what happens across the clip (subjects, motion, camera movement, setting, lighting) with ZERO guesswork. DO NOT rely on meaningless filenames like "${params.filename}".`
+  : hasVisualData
+  ? params.fileType === 'video'
+    ? `Inspect the provided 4-frame chronological video storyboard (15%, 40%, 65%, 85% timestamps) and describe PRECISELY the subject, action progression, camera motion, lighting, and setting with ZERO guesswork. DO NOT rely on meaningless filenames like "${params.filename}".`
+    : `Inspect the provided image directly and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions. DO NOT rely on meaningless filenames like "${params.filename}" or camera numbers like "121 (46).jpg".`
+  : `No raster preview could be extracted for "${params.filename}" (${params.fileType || 'file'}). Base metadata ONLY on clear factual words in filename/instructions without inventing unrelated scenes.`}
+${videoDirective}${imageFramingNote}
 ADDITIONAL ASSET PARAMETERS:
-${params.advanceIsolatedTransparent ? '- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include "transparent background", "isolated", "png", "cut out".' : ''}
-${params.advanceIsolatedWhite ? '- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include "white background", "isolated", "studio shot".' : ''}
+${params.advanceIsolatedTransparent ? `- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include ${params.marketplace === 'Adobe Stock' ? '"transparent", "background", "isolated", "cutout"' : '"transparent background", "isolated", "cut out"'}.` : ''}
+${params.advanceIsolatedWhite ? `- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include ${params.marketplace === 'Adobe Stock' ? '"white", "background", "isolated", "studio"' : '"white background", "isolated", "studio shot"'}.` : ''}
 ${params.advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${params.advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
 ${params.includeConceptualKeywords !== false ? `- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
-In addition to physical visual objects, analyze the underlying mood, emotional resonance, and abstract commercial message of this image (e.g., for renewable energy: "hope", "future", "clean start", "innovation", "responsibility"; for corporate/business: "success", "teamwork", "leadership", "partnership", "growth"; for medical/wellness: "care", "vitality", "trust", "wellness").
-Identify exactly 3-5 top-matching conceptual/abstract keywords. Integrate them into the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
-- Description: ${params.descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : `Concise commercial description under ${params.descLength} characters.`}
-- Category & Topic: Identify the best fitting microstock category and subject topic.
+Analyze the underlying mood, emotional resonance, and commercial message (e.g., "hope", "future", "innovation", "sustainability", "success", "teamwork").
+Integrate those 3-5 top conceptual/abstract single-word keywords into the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
+- Description: ${params.descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : params.marketplace === 'Shutterstock' ? `Rich, complete, searchable Shutterstock title-sentence strictly within ${Math.max(120, params.descLength)} characters (max 200 chars).` : `Concise commercial description sentence under ${params.descLength} characters (never cut mid-word).`}
+- Category & Topic: Pick ONE exact official ${params.marketplace} category plus concise 2-3 word subject topic.
 
 ${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${params.customPrompt.trim()}` : ''}
 
@@ -141,13 +743,22 @@ Output ONLY valid JSON matching this schema:
   "title": "Accurate stock title",
   "topic": "Subject topic",
   "description": "Stock description",
-  "keywords": ["kw1", "kw2", ... exactly ${params.keywordsCount} keywords],
+  "keywords": ["kw1", "kw2", ... ranked keywords],
   "conceptualKeywords": ["concept1", "concept2", "concept3"],
-  "category": "Stock Category"
+  "category": "Official Marketplace Category"
 }`;
 
   const parts: any[] = [];
-  if (params.imageData && params.imageData.includes('base64')) {
+  if (hasDirectVideo && params.videoData) {
+    const [header, base64] = params.videoData.split(';base64,');
+    const mimeType = header ? header.replace('data:', '') : 'video/mp4';
+    parts.push({
+      inlineData: {
+        mimeType: mimeType || 'video/mp4',
+        data: base64,
+      },
+    });
+  } else if (hasVisualData && params.imageData) {
     const [header, base64] = params.imageData.split(';base64,');
     const mimeType = header ? header.replace('data:', '') : 'image/jpeg';
     parts.push({
@@ -164,7 +775,17 @@ Output ONLY valid JSON matching this schema:
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 28000);
+      const timeoutId = setTimeout(() => controller.abort(), hasDirectVideo ? 55000 : 30000);
+
+      const isGemini4 = currentModel.startsWith('gemini-4');
+      const generationConfig: any = {
+        responseMimeType: 'application/json',
+      };
+      if (isGemini4) {
+        generationConfig.thinkingConfig = { thinkingLevel: 'LOW' };
+      } else {
+        generationConfig.temperature = 0.15;
+      }
 
       const response = await fetch(url, {
         method: 'POST',
@@ -174,11 +795,7 @@ Output ONLY valid JSON matching this schema:
         signal: controller.signal,
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig: {
-            temperature: 0.15,
-            maxOutputTokens: 2048,
-            responseMimeType: 'application/json',
-          },
+          generationConfig,
         }),
       });
 
@@ -189,14 +806,11 @@ Output ONLY valid JSON matching this schema:
         const errorMsg = errorData?.error?.message || `HTTP ${response.status}`;
         lastError = new Error(errorMsg);
 
-        // If 404 (model not found), try next candidate model
         if (response.status === 404 || errorMsg.toLowerCase().includes('not found')) {
           console.warn(`Model ${currentModel} not found, trying fallback model...`);
           continue;
         }
 
-        // If rate limit / quota exceeded (429 or ResourceExhausted), switch to next candidate model!
-        // Free tier has separate quota pools for 2.0-flash, 1.5-flash, 2.5-flash
         if (
           response.status === 429 ||
           errorMsg.toLowerCase().includes('quota') ||
@@ -208,12 +822,10 @@ Output ONLY valid JSON matching this schema:
           continue;
         }
 
-        // If invalid API key, throw immediately
         if (response.status === 400 && errorMsg.toLowerCase().includes('api_key')) {
           throw lastError;
         }
 
-        // Otherwise try next candidate
         continue;
       }
 
@@ -224,33 +836,22 @@ Output ONLY valid JSON matching this schema:
         throw new Error('Could not parse Gemini JSON response');
       }
 
-      // 1. Clean Title and eliminate any country/nationality terms or trademarks
-      let rawParsedTitle = (parsed.title || params.filename).trim();
-      let resTitle = sanitizeTitle(rawParsedTitle);
-
+      let resTitle = sanitizeTitle((parsed.title || params.filename).trim());
       if (params.titleLength > 0 && resTitle.length > params.titleLength) {
-        const cut = resTitle.substring(0, params.titleLength);
-        const lastSpace = cut.lastIndexOf(' ');
-        resTitle = (lastSpace > params.titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-      }
-      resTitle = resTitle.replace(/[.,;:!?\s]+$/, '').trim();
-      if (resTitle.length > 0) {
-        resTitle = `${resTitle}.`;
+        resTitle = truncateAtWordBoundary(resTitle.replace(/\.+$/, ''), params.titleLength - 1);
+        resTitle = sanitizeTitle(resTitle);
       }
 
       let resDesc = '';
       if (params.descLength > 0 && parsed.description) {
-        resDesc = sanitizeTitle(parsed.description.trim());
-        if (resDesc.length > params.descLength) {
-          const cut = resDesc.substring(0, params.descLength);
-          const lastSpace = cut.lastIndexOf(' ');
-          resDesc = (lastSpace > params.descLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-        }
+        resDesc = truncateAtWordBoundary(sanitizeTitle(parsed.description.trim()), params.descLength);
       }
 
-      let resKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-      // 2. Strict Title-to-Keyword Alignment: First keywords guaranteed to match Title in exact sequential order
-      resKeywords = alignKeywordsWithTitle(resTitle, resKeywords, params.keywordsCount || 30);
+      const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+      const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, params.keywordsCount || 30, params.marketplace);
+      const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
+        ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
+        : [];
 
       return {
         title: resTitle,
@@ -260,7 +861,8 @@ Output ONLY valid JSON matching this schema:
         rawDescription: parsed.description || '',
         keywords: resKeywords,
         rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
-        category: parsed.category || params.category || 'General',
+        conceptualKeywords,
+        category: normalizeCategoryForMarketplace(parsed.category || params.category, params.marketplace),
         source: `Google Gemini (${currentModel}) Direct AI Vision`,
       };
     } catch (err: any) {
@@ -277,7 +879,6 @@ Output ONLY valid JSON matching this schema:
           err.message.includes('rate') ||
           err.message.includes('429'))
       ) {
-        console.warn(`Encountered ${err.message} on ${currentModel}, trying fallback...`);
         await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
@@ -294,16 +895,26 @@ async function generateViaDirectGroq(
   model: string,
   params: {
     filename: string;
+    fileType?: string;
     imageData?: string;
+    mediaContext?: MediaInspectionMeta;
     marketplace: Marketplace;
     titleLength: number;
     descLength: number;
     keywordsCount: number;
     category?: string;
     customPrompt?: string;
+    advanceIsolatedTransparent?: boolean;
+    advanceIsolatedWhite?: boolean;
+    advanceVector?: boolean;
+    advanceIllustration?: boolean;
+    includeConceptualKeywords?: boolean;
   }
 ) {
-  const targetModel = model || 'llama-3.2-11b-vision-preview';
+  const targetModel =
+    model && !model.startsWith('gemini-')
+      ? model
+      : 'meta-llama/llama-4-scout-17b-16e-instruct';
   const url = 'https://api.groq.com/openai/v1/chat/completions';
 
   const profile = getMarketplaceSeoProfile(
@@ -312,8 +923,23 @@ async function generateViaDirectGroq(
     params.keywordsCount
   );
 
+  const hasVisualData = Boolean(
+    params.imageData &&
+      params.imageData.includes('base64') &&
+      !params.imageData.startsWith('data:image/svg+xml')
+  );
+
+  const groqVideoDirective = getVideoSeoDirective(
+    params.mediaContext ? { ...params.mediaContext, hasDirectVideo: false } : undefined,
+    params.fileType
+  );
+  const imageFramingNote =
+    params.fileType !== 'video' && params.mediaContext?.width && params.mediaContext?.height
+      ? `- Technical Framing: ${params.mediaContext.width}x${params.mediaContext.height}px (${params.mediaContext.orientation || 'horizontal'}).\n`
+      : '';
+
   const userContent: any[] = [];
-  if (params.imageData && params.imageData.includes('base64')) {
+  if (hasVisualData && params.imageData) {
     userContent.push({
       type: 'image_url',
       image_url: { url: params.imageData },
@@ -322,9 +948,8 @@ async function generateViaDirectGroq(
   userContent.push({
     type: 'text',
     text: `${profile.systemPrompt}
-TASK: Inspect the image carefully and output metadata optimized for ${params.marketplace}.
-${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL INSTRUCTIONS:\n${params.customPrompt.trim()}\n` : ''}
-Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "description": "...", "keywords": ["..."], "category": "..."}`,
+TASK: ${params.fileType === 'video' ? 'Inspect the 4-frame video storyboard (15%, 40%, 65%, 85%) carefully' : 'Inspect the image carefully'} and output metadata optimized for ${params.marketplace}.
+${groqVideoDirective}${imageFramingNote}${params.advanceIsolatedTransparent ? '- Isolated on transparent background.\n' : ''}${params.advanceIsolatedWhite ? '- Isolated on white background.\n' : ''}${params.advanceVector ? '- Include Vector style tags.\n' : ''}${params.advanceIllustration ? '- Include Illustration style tags.\n' : ''}${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL INSTRUCTIONS:\n${params.customPrompt.trim()}\n` : ''}Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "description": "...", "keywords": ["..."], "conceptualKeywords": ["..."], "category": "..."}`,
   });
 
   const response = await fetch(url, {
@@ -337,7 +962,7 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
       model: targetModel,
       messages: [{ role: 'user', content: userContent }],
       temperature: 0.2,
-      max_tokens: 800,
+      max_tokens: 1024,
       response_format: { type: 'json_object' },
     }),
   });
@@ -352,31 +977,22 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
   const parsed = extractJson(rawText);
   if (!parsed) throw new Error('Could not parse Groq JSON response');
 
-  let rawParsedTitle = (parsed.title || params.filename).trim();
-  let resTitle = sanitizeTitle(rawParsedTitle);
-
+  let resTitle = sanitizeTitle((parsed.title || params.filename).trim());
   if (params.titleLength > 0 && resTitle.length > params.titleLength) {
-    const cut = resTitle.substring(0, params.titleLength);
-    const lastSpace = cut.lastIndexOf(' ');
-    resTitle = (lastSpace > params.titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-  }
-  resTitle = resTitle.replace(/[.,;:!?\s]+$/, '').trim();
-  if (resTitle.length > 0) {
-    resTitle = `${resTitle}.`;
+    resTitle = truncateAtWordBoundary(resTitle.replace(/\.+$/, ''), params.titleLength - 1);
+    resTitle = sanitizeTitle(resTitle);
   }
 
   let resDesc = '';
   if (params.descLength > 0 && parsed.description) {
-    resDesc = sanitizeTitle(parsed.description.trim());
-    if (resDesc.length > params.descLength) {
-      const cut = resDesc.substring(0, params.descLength);
-      const lastSpace = cut.lastIndexOf(' ');
-      resDesc = (lastSpace > params.descLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-    }
+    resDesc = truncateAtWordBoundary(sanitizeTitle(parsed.description.trim()), params.descLength);
   }
 
-  let resKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-  resKeywords = alignKeywordsWithTitle(resTitle, resKeywords, params.keywordsCount || 30);
+  const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+  const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, params.keywordsCount || 30, params.marketplace);
+  const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
+    ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
+    : [];
 
   return {
     title: resTitle,
@@ -386,19 +1002,20 @@ Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "d
     rawDescription: parsed.description || '',
     keywords: resKeywords,
     rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
-    category: parsed.category || params.category || 'General',
+    conceptualKeywords,
+    category: normalizeCategoryForMarketplace(parsed.category || params.category, params.marketplace),
     source: `Groq Cloud (${targetModel}) Client Direct`,
   };
 }
 
-// Built-in intelligent stock taxonomy fallback (instant, 0ms, zero-cost, 100% offline & static compatible)
+// Built-in offline fallback (ONLY used when settings.offlineModeEnabled === true)
 export function generateClientFallbackMetadata(
   filename: string,
-  category = 'General',
+  category = 'Lifestyle',
   marketplace: Marketplace = 'Adobe Stock',
   targetKeywordsCount = 30,
-  maxTitleLength = 76,
-  maxDescLength = 120,
+  maxTitleLength = 80,
+  maxDescLength = 150,
   advanceVector = false,
   advanceIllustration = false,
   customTopic = '',
@@ -421,8 +1038,16 @@ export function generateClientFallbackMetadata(
         )
     );
 
-  const selectedCategory = (category && category !== 'General' ? category : (customTopic || 'Business & Finance')).trim();
-  const isVectorType = advanceVector || advanceIllustration || filename.toLowerCase().endsWith('.svg') || filename.toLowerCase().endsWith('.eps') || filename.toLowerCase().endsWith('.ai');
+  const selectedCategory = normalizeCategoryForMarketplace(
+    category && category !== 'General' ? category : customTopic || 'Lifestyle',
+    marketplace
+  );
+  const isVectorType =
+    advanceVector ||
+    advanceIllustration ||
+    filename.toLowerCase().endsWith('.svg') ||
+    filename.toLowerCase().endsWith('.eps') ||
+    filename.toLowerCase().endsWith('.ai');
 
   let primarySubject = '';
   if (meaningfulWords.length >= 2) {
@@ -430,151 +1055,53 @@ export function generateClientFallbackMetadata(
   } else if (customTopic && customTopic.trim().length > 3 && !/^\d+$/.test(customTopic)) {
     primarySubject = customTopic.trim();
   } else {
-    const categorySubjects: Record<string, string[]> = {
-      'Business & Finance': [
-        'Professional Business Team in Corporate Office Meeting',
-        'Successful Businesswoman Working on Tablet in Modern Workspace',
-        'Diverse Corporate Colleagues Discussing Project Strategy',
-        'Executive Business People Collaborating in Office Boardroom',
-      ],
-      'Technology': [
-        'Modern Digital Technology and Futuristic Innovation Concept',
-        'Software Developer Working with High Tech Computer Setup',
-        'Artificial Intelligence and Cloud Computing Network',
-      ],
-      'People & Lifestyle': [
-        'Happy Confident Person Smiling in Professional Setting',
-        'Group of Diverse Friends Enjoying Modern Lifestyle',
-        'Young Professional Working in Contemporary Urban Environment',
-      ],
-      'Nature & Landscapes': [
-        'Beautiful Scenic Nature Landscape with Lush Greenery',
-        'Serene Natural Scenery with Sunlight and Vibrant Environment',
-      ],
-      'Graphic Resources': [
-        'Creative Modern Graphic Design Element with Elegant Composition',
-        'Luxury Geometric Abstract Pattern Texture Background',
-      ],
-      'Architectural Blueprint': [
-        'Modern Architectural Building Design and Urban Blueprint Concept',
-        'Contemporary Office Interior Architecture with Glass Windows',
-      ],
-    };
-    const candidates = categorySubjects[selectedCategory] || categorySubjects['Business & Finance'];
-    let hash = 0;
-    for (let i = 0; i < filename.length; i++) hash = (hash * 31 + filename.charCodeAt(i)) % 1000;
-    primarySubject = candidates[hash % candidates.length];
+    primarySubject = isVectorType ? 'Modern Graphic Design Element' : 'Commercial Stock Scene';
   }
 
   let fullTitle = primarySubject;
   if (isVectorType && !fullTitle.toLowerCase().includes('vector')) {
     fullTitle += ' Vector Illustration';
-  } else if (!fullTitle.toLowerCase().includes('concept') && !fullTitle.toLowerCase().includes('background')) {
-    fullTitle += ' Concept';
   }
 
-  if (fullTitle.length > maxTitleLength) {
-    fullTitle = fullTitle.substring(0, maxTitleLength).trim();
-  }
-
-  const categoryKeywordBank: Record<string, string[]> = {
-    'Business & Finance': [
-      'business', 'corporate', 'office', 'professional', 'team', 'meeting', 'people', 'success', 'work', 'colleagues',
-      'management', 'strategy', 'finance', 'company', 'career', 'adult', 'technology', 'communication', 'executive', 'workplace',
-      'laptop', 'conference', 'discussion', 'leader', 'partnership', 'modern', 'job', 'consulting', 'lifestyle', 'commercial',
-      'investment', 'worker', 'marketing', 'project', 'computer', 'planning', 'finance concept', 'working', 'presentation', 'growth'
-    ],
-    'Technology': [
-      'technology', 'digital', 'tech', 'innovation', 'computer', 'network', 'cyber', 'data', 'software', 'ai',
-      'internet', 'future', 'smart', 'communication', 'connection', 'virtual', 'device', 'information', 'online', 'screen',
-      'cloud', 'concept', 'modern', 'developer', 'hardware', 'interface', 'intelligence', 'security', 'science', 'futuristic',
-      'system', 'programming', 'binary', 'electronics', 'web', 'artificial intelligence', 'automation', 'high tech', 'telecom', 'code'
-    ],
-    'People & Lifestyle': [
-      'people', 'lifestyle', 'portrait', 'person', 'happy', 'smiling', 'adult', 'woman', 'professional', 'confidence',
-      'young', 'caucasian', 'casual', 'female', 'success', 'cheerful', 'beautiful', 'day', 'modern', 'attractive',
-      'face', 'standing', 'work', 'life', 'joy', 'indoor', 'wellness', 'urban', 'positive', 'commercial',
-      'happiness', 'friendship', 'model', 'healthy', 'outdoors', 'relaxation', 'smile', 'enjoyment', 'authentic', 'expression'
-    ],
-    'Nature & Landscapes': [
-      'nature', 'outdoor', 'landscape', 'green', 'environment', 'scenic', 'tree', 'natural', 'summer', 'sky',
-      'forest', 'plant', 'fresh', 'beauty', 'park', 'sunlight', 'travel', 'view', 'grass', 'spring',
-      'organic', 'wildlife', 'ecology', 'peaceful', 'countryside', 'clean', 'earth', 'growth', 'flora', 'background',
-      'scenery', 'wood', 'mountain', 'meadow', 'botany', 'conservation', 'freshness', 'bright', 'eco', 'tranquil'
-    ],
-    'Graphic Resources': [
-      'graphic', 'design', 'vector', 'illustration', 'background', 'abstract', 'pattern', 'texture', 'modern', 'art',
-      'element', 'creative', 'isolated', 'concept', 'template', 'backdrop', 'style', 'decorative', 'shape', 'digital',
-      'luxury', 'vintage', 'seamless', 'print', 'wallpaper', 'line art', 'drawing', 'collection', 'commercial', 'high quality',
-      'geometric', 'symbol', 'minimalist', 'poster', 'cover', 'flat', 'banner', 'emblem', 'icon', 'ornament'
-    ],
-  };
-
-  const conceptualKeywordsMap: Record<string, string[]> = {
-    'Business & Finance': ['success', 'teamwork', 'leadership', 'growth', 'achievement'],
-    'Technology': ['innovation', 'connectivity', 'future', 'digital transformation', 'efficiency'],
-    'People & Lifestyle': ['happiness', 'togetherness', 'freedom', 'wellbeing', 'authenticity'],
-    'Nature & Landscapes': ['harmony', 'sustainability', 'tranquility', 'hope', 'preservation'],
-    'Graphic Resources': ['creativity', 'elegance', 'modernity', 'inspiration', 'simplicity'],
-    'Health & Wellness': ['vitality', 'balance', 'healing', 'mindfulness', 'energy'],
-    'Food & Beverage': ['abundance', 'tradition', 'pleasure', 'celebration', 'freshness'],
-    'Travel & Exploration': ['adventure', 'discovery', 'curiosity', 'journey', 'wanderlust'],
-    'Education & Learning': ['knowledge', 'opportunity', 'empowerment', 'curiosity', 'progress'],
-    'Industrial & Architecture': ['strength', 'precision', 'infrastructure', 'durability', 'vision'],
-  };
-
-  const pool = categoryKeywordBank[selectedCategory] || categoryKeywordBank['Business & Finance'];
-  const conceptualKeywords = includeConceptualKeywords
-    ? (conceptualKeywordsMap[selectedCategory] || ['success', 'inspiration', 'creativity', 'growth', 'innovation']).slice(0, 5)
-    : [];
+  fullTitle = truncateAtWordBoundary(fullTitle, maxTitleLength);
+  const cleanedTitle = sanitizeTitle(fullTitle);
 
   const finalKeywords: string[] = [];
-
-  // Add meaningful words from title first (highest search ranking)
   meaningfulWords.forEach((w) => {
     const low = w.toLowerCase();
     if (!finalKeywords.includes(low)) finalKeywords.push(low);
   });
-
   if (isVectorType) {
-    ['vector', 'illustration', 'graphic', 'isolated', 'design element'].forEach((k) => {
+    ['vector', 'illustration', 'graphic', 'design', 'isolated'].forEach((k) => {
       if (!finalKeywords.includes(k)) finalKeywords.push(k);
     });
   }
 
-  // Inject conceptual keywords into the keywords pool
-  conceptualKeywords.forEach((ck) => {
-    if (!finalKeywords.includes(ck)) finalKeywords.push(ck);
-  });
+  const fallbackDesc =
+    maxDescLength === 0
+      ? ''
+      : truncateAtWordBoundary(
+          `${cleanedTitle.replace(/\.$/, '')} suitable for commercial design, advertising, and editorial use.`,
+          maxDescLength
+        );
 
-  pool.forEach((k) => {
-    if (finalKeywords.length < targetKeywordsCount && !finalKeywords.includes(k)) {
-      finalKeywords.push(k);
-    }
-  });
-
-  const fallbackDesc = maxDescLength === 0
-    ? ''
-    : `${fullTitle}. High quality microstock asset suitable for commercial design, marketing, and editorial publications.`.slice(0, maxDescLength);
-
-  const cleanedTitle = sanitizeTitle(fullTitle);
-  const alignedKeywords = alignKeywordsWithTitle(cleanedTitle, finalKeywords, targetKeywordsCount);
+  const alignedKeywords = alignKeywordsWithTitle(cleanedTitle, finalKeywords, targetKeywordsCount, marketplace);
 
   return {
     title: cleanedTitle,
     rawTitle: cleanedTitle,
     topic: selectedCategory,
     description: fallbackDesc,
-    rawDescription: `${cleanedTitle}. High quality microstock asset suitable for commercial design, marketing, and editorial publications.`,
+    rawDescription: fallbackDesc,
     keywords: alignedKeywords,
     rawKeywords: alignedKeywords,
-    conceptualKeywords: conceptualKeywords.length > 0 ? conceptualKeywords : undefined,
+    conceptualKeywords: includeConceptualKeywords ? ['creativity', 'modern', 'concept'] : undefined,
     category: selectedCategory,
-    source: 'Smart Stock Taxonomy Engine (Free Instant Web Engine)',
+    source: 'Offline Smart SEO Engine',
   };
 }
 
-// Master Unified Metadata Generator with Dual Engine (Server-first with instant Client-Side Fallback)
+// Master Unified Metadata Generator (Server-first with direct static-host fallback & strict error surfacing)
 export async function generateMetadataForAsset(
   asset: StockAsset,
   settings: GenerationSettings,
@@ -582,37 +1109,29 @@ export async function generateMetadataForAsset(
   keyPoolIndex = 0
 ): Promise<{
   title: string;
+  rawTitle?: string;
   topic: string;
   description: string;
+  rawDescription?: string;
   keywords: string[];
+  rawKeywords?: string[];
+  conceptualKeywords?: string[];
   category: string;
   source?: string;
+  resolvedPreviewUrl?: string;
 }> {
-  // Extract fast thumbnail if image
-  let imageData = '';
-  if (asset.file && asset.file.type.startsWith('image/')) {
-    try {
-      imageData = await fileToFastThumbnail(asset.file);
-    } catch (e) {
-      console.warn('Fast thumbnail conversion warning:', e);
-    }
-  } else if (asset.previewUrl) {
-    try {
-      if (asset.previewUrl.startsWith('data:image/')) {
-        imageData = asset.previewUrl;
-      } else if (asset.previewUrl.startsWith('blob:')) {
-        const resp = await fetch(asset.previewUrl);
-        const blob = await resp.blob();
-        if (blob && blob.type.startsWith('image/')) {
-          imageData = await fileToFastThumbnail(new File([blob], asset.filename, { type: blob.type }));
-        }
-      }
-    } catch (e) {
-      console.warn('PreviewURL thumbnail conversion warning:', e);
-    }
-  }
+  const preferDirectVideo =
+    !settings.offlineModeEnabled &&
+    settings.aiProvider !== 'Groq Cloud' &&
+    !(settings.customApiKey || '').trim().startsWith('gsk_');
 
-  // If offline mode is explicitly requested
+  const { imageData, videoData, videoProxyId, resolvedPreviewUrl, mediaContext } = await prepareMediaPayload(
+    asset,
+    preferDirectVideo,
+    settings.deepVideoProxy ?? true
+  );
+
+  // Only run offline heuristic generator if user explicitly enabled Offline Mode
   if (settings.offlineModeEnabled) {
     return generateClientFallbackMetadata(
       asset.filename,
@@ -636,18 +1155,31 @@ export async function generateMetadataForAsset(
       }
     });
   }
-  if (settings.customApiKey && typeof settings.customApiKey === 'string' && settings.customApiKey.trim().length > 5 && !candidateKeys.includes(settings.customApiKey.trim())) {
+  if (
+    settings.customApiKey &&
+    typeof settings.customApiKey === 'string' &&
+    settings.customApiKey.trim().length > 5 &&
+    !candidateKeys.includes(settings.customApiKey.trim())
+  ) {
     candidateKeys.push(settings.customApiKey.trim());
   }
 
-  const selectedKey = candidateKeys.length > 0
-    ? candidateKeys[keyPoolIndex % candidateKeys.length]
-    : '';
+  if (candidateKeys.length === 0) {
+    throw new Error('API Key Required: Please add your Google Gemini or Groq API Key.');
+  }
 
-  // 1. Try Backend API first if server is running
+  const orderedCandidateKeys = [
+    ...candidateKeys.slice(keyPoolIndex % candidateKeys.length),
+    ...candidateKeys.slice(0, keyPoolIndex % candidateKeys.length),
+  ];
+
+  // 1. Try Backend API first
+  let shouldFallbackToDirectClient = false;
+  let serverErrorMessage = '';
+
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout for server
+    const timeoutId = setTimeout(() => controller.abort(), (videoData || videoProxyId) ? 75000 : 35000);
 
     const res = await fetch('/api/generate-metadata', {
       method: 'POST',
@@ -657,6 +1189,9 @@ export async function generateMetadataForAsset(
         filename: asset.filename,
         fileType: asset.fileType,
         imageData,
+        videoData,
+        videoProxyId,
+        mediaContext,
         aiProvider: settings.aiProvider,
         model: settings.model,
         marketplace,
@@ -666,129 +1201,116 @@ export async function generateMetadataForAsset(
         customPrompt: settings.customPrompt,
         category: asset.category,
         topic: asset.topic || settings.defaultTopic,
-        offlineMode: settings.offlineModeEnabled,
-        apiKey: selectedKey,
-        apiKeys: candidateKeys,
+        offlineMode: false,
+        apiKey: orderedCandidateKeys[0],
+        apiKeys: orderedCandidateKeys,
         advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
         advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
         advanceVector: asset.advanceVector ?? settings.advanceVector,
         advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
+        includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
       }),
     });
 
     clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data && (data.title || data.keywords)) {
-        let rawTitle = (data.title || asset.filename).trim();
-        let finalTitle = sanitizeTitle(rawTitle);
+    const data = await res.json().catch(() => ({}));
 
-        if (settings.titleLength > 0 && finalTitle.length > settings.titleLength) {
-          const cut = finalTitle.substring(0, settings.titleLength);
-          const lastSpace = cut.lastIndexOf(' ');
-          finalTitle = (lastSpace > settings.titleLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-        }
-        finalTitle = finalTitle.replace(/[.,;:!?\s]+$/, '').trim();
-        if (finalTitle.length > 0) {
-          finalTitle = `${finalTitle}.`;
-        }
-
-        let finalDesc = '';
-        if (settings.descLength > 0 && data.description) {
-          finalDesc = sanitizeTitle(data.description.trim());
-          if (finalDesc.length > settings.descLength) {
-            const cut = finalDesc.substring(0, settings.descLength);
-            const lastSpace = cut.lastIndexOf(' ');
-            finalDesc = (lastSpace > settings.descLength * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
-          }
-        }
-
-        let rawKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
-        let finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30);
-
-        return {
-          ...data,
-          title: finalTitle,
-          rawTitle: data.rawTitle || finalTitle,
-          description: finalDesc,
-          rawDescription: data.rawDescription || data.description || '',
-          keywords: finalKeywords,
-          rawKeywords: data.rawKeywords || data.keywords || finalKeywords,
-        };
+    if (res.ok && data && (data.title || data.keywords)) {
+      let finalTitle = sanitizeTitle((data.title || asset.filename).trim());
+      if (settings.titleLength > 0 && finalTitle.length > settings.titleLength) {
+        finalTitle = truncateAtWordBoundary(finalTitle.replace(/\.+$/, ''), settings.titleLength - 1);
+        finalTitle = sanitizeTitle(finalTitle);
       }
+
+      let finalDesc = '';
+      if (settings.descLength > 0 && data.description) {
+        finalDesc = truncateAtWordBoundary(sanitizeTitle(data.description.trim()), settings.descLength);
+      }
+
+      const rawKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
+      const finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30, marketplace);
+
+      return {
+        ...data,
+        title: finalTitle,
+        rawTitle: data.rawTitle || finalTitle,
+        description: finalDesc,
+        rawDescription: data.rawDescription || data.description || '',
+        keywords: finalKeywords,
+        rawKeywords: data.rawKeywords || data.keywords || finalKeywords,
+        conceptualKeywords: Array.isArray(data.conceptualKeywords) ? data.conceptualKeywords : undefined,
+        category: normalizeCategoryForMarketplace(data.category || asset.category, marketplace),
+        ...(resolvedPreviewUrl ? { resolvedPreviewUrl } : {}),
+      };
     }
-  } catch (backendErr) {
-    // Backend not available (e.g. static host on Vercel/Netlify/GitHub Pages) or timed out
+
+    // If backend does not exist (404 static hosting) or proxy error (502/503/504), allow direct client fallback
+    if (res.status === 404 || res.status === 502 || res.status === 503 || res.status === 504) {
+      shouldFallbackToDirectClient = true;
+    } else {
+      serverErrorMessage = data?.error || `Server error (${res.status})`;
+    }
+  } catch (backendErr: any) {
+    // Network error / static host without Express backend / aborted
+    shouldFallbackToDirectClient = true;
+    serverErrorMessage = backendErr?.message || 'Backend connection failed';
   }
 
-  // 2. Client-Side Direct API with Multi-Key Rotation Pool
-  if (candidateKeys.length > 0) {
-    const startIdx = keyPoolIndex % candidateKeys.length;
-    const orderedKeys = [
-      ...candidateKeys.slice(startIdx),
-      ...candidateKeys.slice(0, startIdx),
-    ];
+  if (!shouldFallbackToDirectClient && serverErrorMessage) {
+    throw new Error(serverErrorMessage);
+  }
 
-    let lastDirectError: any = null;
-    for (let i = 0; i < orderedKeys.length; i++) {
-      const currentKey = orderedKeys[i];
-      try {
-        if (settings.aiProvider === 'Groq Cloud' || currentKey.startsWith('gsk_')) {
-          return await generateViaDirectGroq(currentKey, settings.model, {
-            filename: asset.filename,
-            imageData,
-            marketplace,
-            titleLength: settings.titleLength,
-            descLength: settings.descLength,
-            keywordsCount: settings.keywordsCount,
-            category: asset.category,
-            customPrompt: settings.customPrompt,
-          });
-        } else {
-          return await generateViaDirectGemini(currentKey, settings.model, {
-            filename: asset.filename,
-            imageData,
-            marketplace,
-            titleLength: settings.titleLength,
-            descLength: settings.descLength,
-            keywordsCount: settings.keywordsCount,
-            category: asset.category,
-            customPrompt: settings.customPrompt,
-            advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
-            advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
-            advanceVector: asset.advanceVector ?? settings.advanceVector,
-            advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
-          });
-        }
-      } catch (clientDirectErr: any) {
-        lastDirectError = clientDirectErr;
-        console.warn(`Client direct AI call with key #${i + 1} failed:`, clientDirectErr?.message);
-        // If there's another API key to try in the pool, wait 3.5s before calling next API key
-        if (i < orderedKeys.length - 1) {
-          console.log(`API limit/error on key #${i + 1}. Waiting 3.5s before calling next API key in pool...`);
-          await new Promise((r) => setTimeout(r, 3500));
-        }
+  // 2. Client-Side Direct API Fallback (only when backend endpoint is unavailable)
+  let lastDirectError: any = null;
+  for (let i = 0; i < orderedCandidateKeys.length; i++) {
+    const currentKey = orderedCandidateKeys[i];
+    try {
+      if (settings.aiProvider === 'Groq Cloud' || currentKey.startsWith('gsk_')) {
+        return await generateViaDirectGroq(currentKey, settings.model || '', {
+          filename: asset.filename,
+          fileType: asset.fileType,
+          imageData,
+          mediaContext,
+          marketplace,
+          titleLength: settings.titleLength,
+          descLength: settings.descLength,
+          keywordsCount: settings.keywordsCount,
+          category: asset.category,
+          customPrompt: settings.customPrompt,
+          advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
+          advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
+          advanceVector: asset.advanceVector ?? settings.advanceVector,
+          advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
+          includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
+        });
+      } else {
+        return await generateViaDirectGemini(currentKey, settings.model, {
+          filename: asset.filename,
+          fileType: asset.fileType,
+          imageData,
+          videoData,
+          mediaContext,
+          marketplace,
+          titleLength: settings.titleLength,
+          descLength: settings.descLength,
+          keywordsCount: settings.keywordsCount,
+          category: asset.category,
+          customPrompt: settings.customPrompt,
+          advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
+          advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
+          advanceVector: asset.advanceVector ?? settings.advanceVector,
+          advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
+          includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
+        });
       }
-    }
-
-    // If candidate keys were provided and all failed, throw the real error so user sees it in the UI!
-    if (lastDirectError) {
-      throw new Error(`AI Generation Error: ${lastDirectError.message || 'API key rejected or quota exhausted.'}`);
+    } catch (clientDirectErr: any) {
+      lastDirectError = clientDirectErr;
+      if (i < orderedCandidateKeys.length - 1) {
+        await new Promise((r) => setTimeout(r, 3500));
+      }
     }
   }
 
-  // 3. Fallback: Built-in Smart Taxonomy Engine (Free Instant Web Engine)
-  return generateClientFallbackMetadata(
-    asset.filename,
-    asset.category,
-    marketplace,
-    settings.keywordsCount,
-    settings.titleLength,
-    settings.descLength,
-    asset.advanceVector ?? settings.advanceVector,
-    asset.advanceIllustration ?? settings.advanceIllustration,
-    asset.topic || settings.defaultTopic,
-    settings.includeConceptualKeywords ?? true
-  );
+  throw new Error(`AI Generation Error: ${lastDirectError?.message || serverErrorMessage || 'API key rejected or quota exhausted.'}`);
 }

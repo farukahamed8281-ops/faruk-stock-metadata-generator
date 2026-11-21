@@ -19,7 +19,13 @@ import { exportAssetsToZip, generateRenamedFilename } from './utils/zipExporter'
 import { downloadSingleAssetWithMetadata } from './utils/metadataEmbedder';
 import { getMarketplaceSeoProfile } from './utils/marketplacePrompts';
 import { generateMetadataForAsset, fileToFastThumbnail } from './services/aiMetadataService';
-import { sanitizeTitle, alignKeywordsWithTitle } from './utils/stockSeoSanitizer';
+import {
+  sanitizeTitle,
+  alignKeywordsWithTitle,
+  toSmartSentenceCase,
+  truncateAtWordBoundary,
+  normalizeCategoryForMarketplace,
+} from './utils/stockSeoSanitizer';
 
 // Helper: Fast lightweight thumbnail conversion for AI vision (400px @ 0.70 JPEG = ~12-18KB, uploads & processes in milliseconds)
 const fileToAiThumbnailBase64 = fileToFastThumbnail;
@@ -72,7 +78,7 @@ export default function App() {
 
     const defaultSettings: GenerationSettings = {
       aiProvider: 'Google Gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-4-hydrogen',
       batchSize: 2, // 2-3 concurrent parallel batches (matches user request)
       rpmEnabled: false,
       rpmLimit: 15,
@@ -85,8 +91,8 @@ export default function App() {
       defaultTopic: 'General Stock',
       saveJpegInFolder: false,
       removeSpecialChars: true,
-      titleLength: 76,
-      descLength: 57,
+      titleLength: 80,
+      descLength: 150,
       keywordsCount: 30,
       customPrompt: '',
       customPromptPreset: 'default',
@@ -105,6 +111,7 @@ export default function App() {
       strictStockCompliance: true,
       adobeTop10Priority: true,
       includeConceptualKeywords: true,
+      deepVideoProxy: true,
       negativeKeywords: [
         'watermark',
         'copyright',
@@ -131,20 +138,56 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         const mergedKeys = Array.from(new Set([...(parsed.apiKeys || []), ...savedKeys]));
-        let currentModel = parsed.model || 'gemini-2.5-flash';
+        let currentModel = parsed.model || 'gemini-4-hydrogen';
         if (
           currentModel.includes('gemini-2.5-pro') ||
           currentModel.includes('gemini-1.5') ||
-          currentModel.includes('gemini-2.0')
+          currentModel.includes('gemini-2.0') ||
+          currentModel.includes('gemini-3.7') ||
+          currentModel.includes('gemini-3.8')
         ) {
-          currentModel = 'gemini-2.5-flash';
+          currentModel = 'gemini-4-hydrogen';
+        }
+        if (currentModel === 'llama-3.2-11b-vision-preview') {
+          currentModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
         }
         if (parsed.defaultTopic === 'Architectural Blueprint') {
           parsed.defaultTopic = 'General Stock';
         }
+        // Restore original orange theme (#ff5533) if migrated from forced cyan override
+        const migratedKey = 'faruk_theme_restored_v2';
+        let theme = parsed.themeColor || '#ff5533';
+        if (!localStorage.getItem(migratedKey)) {
+          if (theme === '#00F0FF') {
+            theme = '#ff5533';
+          }
+          localStorage.setItem(migratedKey, '1');
+        }
+        // Upgrade legacy broken 57-char default description cap to 150 chars
+        const seoDefaultsKey = 'faruk_seo_defaults_v3';
+        let descLengthVal = parsed.descLength ?? defaultSettings.descLength;
+        if (!localStorage.getItem(seoDefaultsKey)) {
+          if (descLengthVal === 57) {
+            descLengthVal = 150;
+          }
+          localStorage.setItem(seoDefaultsKey, '1');
+        }
+        // Upgrade Adobe Stock baseline defaults (80 chars, 30 pure single-word keywords) without overriding custom user values
+        const adobeSeoKey = 'faruk_adobe_seo_v5';
+        let titleLengthVal = parsed.titleLength ?? defaultSettings.titleLength;
+        let keywordsCountVal = parsed.keywordsCount ?? defaultSettings.keywordsCount;
+        if (!localStorage.getItem(adobeSeoKey)) {
+          if (titleLengthVal === 76) titleLengthVal = 80;
+          if (keywordsCountVal === 35) keywordsCountVal = 30;
+          localStorage.setItem(adobeSeoKey, '1');
+        }
         return {
           ...defaultSettings,
           ...parsed,
+          titleLength: titleLengthVal,
+          descLength: descLengthVal,
+          keywordsCount: keywordsCountVal,
+          themeColor: theme,
           model: currentModel,
           apiKeys: mergedKeys,
           customApiKey: mergedKeys[0] || parsed.customApiKey || defaultSettings.customApiKey,
@@ -177,7 +220,7 @@ export default function App() {
         const sanitizedT = sanitizeTitle(asset.title);
         let sanitizedK = asset.keywords;
         if (asset.keywords && asset.keywords.length > 0) {
-          sanitizedK = alignKeywordsWithTitle(sanitizedT, asset.keywords, settings.keywordsCount || 30);
+          sanitizedK = alignKeywordsWithTitle(sanitizedT, asset.keywords, settings.keywordsCount || 30, selectedMarketplace);
         }
         if (sanitizedT !== asset.title || sanitizedK !== asset.keywords) {
           changed = true;
@@ -191,7 +234,7 @@ export default function App() {
       });
       return changed ? updated : prev;
     });
-  }, [settings.keywordsCount]);
+  }, [settings.keywordsCount, selectedMarketplace]);
 
   // State: Generation flow
   const [isGenerating, setIsGenerating] = useState(false);
@@ -268,21 +311,6 @@ export default function App() {
     const activeSettings = currentSettings || settings;
     let title = (rawTitle || '').trim();
 
-    // 1. Clean previous background/isolation phrases and style words to avoid conflict/duplication
-    title = title
-      .replace(/\s*isolated on (transparent|white|black|dark|blue|grey|gray|green|red)\s*background/gi, '')
-      .replace(/\s*isolated on black ba\b/gi, '')
-      .replace(/\s*isolated on\s*$/gi, '')
-      .replace(/\s*isolated\s*$/gi, '')
-      .replace(/\s+Vector(\s+Illustration)?/gi, '')
-      .replace(/\s+Illustration/gi, '')
-      .replace(/\.[^/.]+$/, '')
-      .trim();
-
-    if (activeSettings.removeSpecialChars) {
-      title = title.replace(/[^\w\s-]/gi, '');
-    }
-
     const prefixEnabled = asset?.advancePrefixEnabled !== undefined ? asset.advancePrefixEnabled : activeSettings.advancePrefixEnabled;
     const prefix = asset?.advancePrefix !== undefined ? asset.advancePrefix : activeSettings.advanceTitlePrefix;
     const suffixEnabled = asset?.advanceSuffixEnabled !== undefined ? asset.advanceSuffixEnabled : activeSettings.advanceSuffixEnabled;
@@ -291,6 +319,30 @@ export default function App() {
     const isIllustration = asset?.advanceIllustration !== undefined ? asset.advanceIllustration : activeSettings.advanceIllustration;
     const isTransparent = asset?.advanceIsolatedTransparent !== undefined ? asset.advanceIsolatedTransparent : activeSettings.advanceIsolatedTransparent;
     const isWhite = asset?.advanceIsolatedWhite !== undefined ? asset.advanceIsolatedWhite : activeSettings.advanceIsolatedWhite;
+
+    // 1. Only strip toggle-managed background/style suffixes when toggling so genuine AI words ("illustration", "vector") aren't deleted
+    title = title
+      .replace(/\s*isolated on (transparent|white|black|dark|blue|grey|gray|green|red)\s*background/gi, '')
+      .replace(/\s*isolated on black ba\b/gi, '')
+      .replace(/\s*isolated on\s*$/gi, '')
+      .replace(/\s*isolated\s*$/gi, '')
+      .replace(/\.[^/.]+$/, '')
+      .trim();
+
+    if (isVector) {
+      title = title.replace(/\s+Vector(\s+Illustration)?/gi, '').trim();
+    }
+    if (isIllustration) {
+      title = title.replace(/\s+Illustration/gi, '').trim();
+    }
+
+    if (activeSettings.removeSpecialChars) {
+      title = title
+        .replace(/['’]s\b/gi, '')
+        .replace(/[^\w\s-]/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
 
     // Prefix if enabled
     if (prefixEnabled && prefix?.trim()) {
@@ -329,19 +381,17 @@ export default function App() {
     if (activeSettings.titleCaseStyle === 'titleCase') {
       title = title.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.substring(1).toLowerCase());
     } else if (activeSettings.titleCaseStyle === 'sentenceCase' || activeSettings.titleCaseStyle === 'default') {
-      title = title.charAt(0).toUpperCase() + title.substring(1).toLowerCase();
+      title = toSmartSentenceCase(title);
     } else if (activeSettings.titleCaseStyle === 'upperCase') {
       title = title.toUpperCase();
     } else if (activeSettings.titleCaseStyle === 'lowerCase') {
       title = title.toLowerCase();
     }
 
-    // Strictly enforce activeSettings.titleLength slider limit
-    const maxTitleLen = activeSettings.titleLength || 76;
+    // Strictly enforce activeSettings.titleLength slider limit on word boundaries
+    const maxTitleLen = activeSettings.titleLength || 80;
     if (maxTitleLen > 0 && title.length > maxTitleLen) {
-      const cut = title.substring(0, maxTitleLen);
-      const lastSpace = cut.lastIndexOf(' ');
-      title = (lastSpace > maxTitleLen * 0.75 ? cut.substring(0, lastSpace) : cut).trim();
+      title = truncateAtWordBoundary(title.replace(/\.+$/, ''), maxTitleLen - 1);
     }
 
     // Always ensure title ends with a single full stop (.)
@@ -395,7 +445,7 @@ export default function App() {
             if (updatedAsset.keywords && updatedAsset.keywords.length > 0) {
               const baseKeywords = (updatedAsset.rawKeywords && updatedAsset.rawKeywords.length > 0) ? updatedAsset.rawKeywords : updatedAsset.keywords;
               const filtered = baseKeywords.filter((kw) => !updated.negativeKeywords.includes(kw.toLowerCase()));
-              updatedAsset.keywords = alignKeywordsWithTitle(newTitle, filtered, updated.keywordsCount);
+              updatedAsset.keywords = alignKeywordsWithTitle(newTitle, filtered, updated.keywordsCount, selectedMarketplace);
             }
             return updatedAsset;
           })
@@ -436,7 +486,7 @@ export default function App() {
             const baseKeywords = (asset.rawKeywords && asset.rawKeywords.length > 0) ? asset.rawKeywords : asset.keywords;
             if (!baseKeywords || baseKeywords.length === 0) return asset;
             const filtered = baseKeywords.filter((kw) => !updated.negativeKeywords.includes(kw.toLowerCase()));
-            const cleanKeywords = alignKeywordsWithTitle(asset.title || asset.filename, filtered, targetCount);
+            const cleanKeywords = alignKeywordsWithTitle(asset.title || asset.filename, filtered, targetCount, selectedMarketplace);
             return {
               ...asset,
               rawKeywords: asset.rawKeywords || baseKeywords,
@@ -478,6 +528,7 @@ export default function App() {
     setSettings((prev) => ({
       ...prev,
       titleLength: profile.recommendedTitleLength,
+      descLength: prev.descLength === 0 ? 0 : profile.recommendedDescLength,
       keywordsCount: profile.recommendedKeywordsCount,
       titleCaseStyle: 'sentenceCase',
     }));
@@ -511,6 +562,10 @@ export default function App() {
       let previewUrl = '';
       if (file.type.startsWith('image/')) {
         previewUrl = URL.createObjectURL(file);
+      } else if (isVideo || isVector) {
+        try {
+          previewUrl = await fileToFastThumbnail(file);
+        } catch {}
       }
 
       newItems.push({
@@ -522,7 +577,7 @@ export default function App() {
         size: file.size,
         previewUrl,
         status: 'idle',
-        category: 'Graphic Resources',
+        category: normalizeCategoryForMarketplace(isVector ? 'Graphic Resources' : 'Lifestyle', selectedMarketplace),
         title: '',
         rawTitle: '',
         description: '',
@@ -695,17 +750,18 @@ export default function App() {
     try {
       const data = await generateMetadataForAsset(target, settings, selectedMarketplace, 0);
 
-      let cleanKeywords = (data.keywords || []).filter(
-        (kw: string) => !settings.negativeKeywords.includes(kw.toLowerCase())
+      const rawKwPool = ((data as any).rawKeywords && (data as any).rawKeywords.length > 0 ? (data as any).rawKeywords : data.keywords) || [];
+      let cleanKeywords = rawKwPool.filter(
+        (kw: string) => !settings.negativeKeywords.includes(String(kw).toLowerCase())
       );
 
       const rawTitle = data.title || target.filename;
       const formattedTitle = formatTitleWithSettings(rawTitle, target);
       const finalDesc = settings.descLength === 0
         ? ''
-        : (data.description || '').slice(0, settings.descLength);
-      // STRICT RANKING ALIGNMENT: Title keywords appear first (#1 to #10) in exact sequential order
-      const finalKeywords = alignKeywordsWithTitle(formattedTitle, cleanKeywords, settings.keywordsCount);
+        : truncateAtWordBoundary(data.description || '', settings.descLength);
+      // STRICT RANKING ALIGNMENT: Title keywords appear first in exact priority order
+      const finalKeywords = alignKeywordsWithTitle(formattedTitle, cleanKeywords, settings.keywordsCount, selectedMarketplace);
 
       handleUpdateAsset(id, {
         rawTitle,
@@ -714,8 +770,10 @@ export default function App() {
         rawDescription: (data as any).rawDescription || data.description || '',
         keywords: finalKeywords,
         rawKeywords: (data as any).rawKeywords || data.keywords || cleanKeywords,
+        conceptualKeywords: (data as any).conceptualKeywords,
         topic: data.topic || target.topic || settings.defaultTopic,
-        category: data.category || target.category,
+        category: normalizeCategoryForMarketplace(data.category || target.category, selectedMarketplace),
+        ...( !target.previewUrl && (data as any).resolvedPreviewUrl ? { previewUrl: (data as any).resolvedPreviewUrl } : {} ),
         status: 'completed',
         error: undefined,
         generatedAt: new Date().toLocaleTimeString(),
@@ -733,7 +791,7 @@ export default function App() {
   const handleGenerate = async () => {
     if (assets.length === 0 || isGenerating) return;
 
-    // Strict Check: Check if user has an active API key
+    // Strict Check: Check if user has an active personal API key
     const activeKeys = settings.apiKeys && settings.apiKeys.length > 0
       ? settings.apiKeys
       : settings.customApiKey
@@ -742,11 +800,11 @@ export default function App() {
 
     const hasValidKey = activeKeys.some((k) => k && k.trim().length > 10);
 
-    if (!hasValidKey && !hasGeminiKey) {
+    if (!hasValidKey && !settings.offlineModeEnabled) {
       addToast(
         'error',
         'API Key Required',
-        'Please enter your Google Gemini (or Groq) API Key to generate metadata.'
+        'Please enter your personal Google Gemini (or Groq) API Key to generate metadata.'
       );
       setIsApiKeyOpen(true);
       return;
@@ -819,17 +877,18 @@ export default function App() {
           throw lastError || new Error('Generation failed');
         }
 
-        let cleanKeywords = (data.keywords || []).filter(
-          (kw: string) => !settings.negativeKeywords.includes(kw.toLowerCase())
+        const rawKwPool = ((data as any).rawKeywords && (data as any).rawKeywords.length > 0 ? (data as any).rawKeywords : data.keywords) || [];
+        let cleanKeywords = rawKwPool.filter(
+          (kw: string) => !settings.negativeKeywords.includes(String(kw).toLowerCase())
         );
 
         const rawTitle = data.title || currentAsset.filename;
         const formattedTitle = formatTitleWithSettings(rawTitle, currentAsset);
         const finalDesc = settings.descLength === 0
           ? ''
-          : (data.description || '').slice(0, settings.descLength);
-        // STRICT RANKING ALIGNMENT: First keywords match Title in exact sequential order
-        const finalKeywords = alignKeywordsWithTitle(formattedTitle, cleanKeywords, settings.keywordsCount);
+          : truncateAtWordBoundary(data.description || '', settings.descLength);
+        // STRICT RANKING ALIGNMENT: First keywords match Title in exact priority order
+        const finalKeywords = alignKeywordsWithTitle(formattedTitle, cleanKeywords, settings.keywordsCount, selectedMarketplace);
 
         handleUpdateAsset(currentAsset.id, {
           rawTitle,
@@ -839,7 +898,9 @@ export default function App() {
           rawDescription: (data as any).rawDescription || data.description || '',
           keywords: finalKeywords,
           rawKeywords: (data as any).rawKeywords || data.keywords || cleanKeywords,
-          category: data.category || currentAsset.category,
+          conceptualKeywords: (data as any).conceptualKeywords,
+          category: normalizeCategoryForMarketplace(data.category || currentAsset.category, selectedMarketplace),
+          ...( !currentAsset.previewUrl && (data as any).resolvedPreviewUrl ? { previewUrl: (data as any).resolvedPreviewUrl } : {} ),
           status: 'completed',
           error: undefined,
           generatedAt: new Date().toLocaleTimeString(),
@@ -898,9 +959,9 @@ export default function App() {
         return [newRecord, ...filtered.slice(0, 19)];
       });
 
-      // Auto Download CSV if enabled
+      // Auto Download CSV if enabled (always keep original filenames so CSV matches files uploaded directly to portal)
       if (settings.autoDownloadCsv) {
-        exportAssetsToCsv(completedOnes, selectedMarketplace, settings.fileExtension);
+        exportAssetsToCsv(completedOnes, selectedMarketplace, settings.fileExtension, false);
       }
     }
 
@@ -914,18 +975,18 @@ export default function App() {
     addToast('success', 'Copied to Clipboard', label);
   };
 
-  // Export CSV
+  // Export CSV (matches original filenames; Download ZIP renames both files and CSV together)
   const handleExportCsv = () => {
     const readyAssets = assets.filter((a) => a.status === 'completed');
     if (readyAssets.length === 0) {
       addToast('error', 'No Generated Metadata', 'Generate metadata for your files first.');
       return;
     }
-    exportAssetsToCsv(readyAssets, selectedMarketplace, settings.fileExtension);
+    exportAssetsToCsv(readyAssets, selectedMarketplace, settings.fileExtension, false);
     addToast(
       'success',
       'CSV Exported',
-      `Downloaded ${readyAssets.length} items formatted for ${selectedMarketplace}.`
+      `Downloaded ${readyAssets.length} items for ${selectedMarketplace} matching original filenames (use Download ZIP if you want Title-renamed files).`
     );
   };
 
@@ -990,20 +1051,29 @@ export default function App() {
   const completedCount = assets.filter((a) => a.status === 'completed').length;
 
   return (
-    <div className="min-h-screen bg-[#0f1115] text-gray-100 flex flex-col font-sans selection:bg-orange-500 selection:text-white">
+    <div className="min-h-screen bg-[#0b0d12] text-slate-100 flex flex-col font-sans selection:bg-[#ff5533] selection:text-white relative overflow-x-hidden">
+      {/* Subtle Warm Ambient Backdrop Illumination */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[500px] bg-gradient-to-b from-[#ff5533]/8 via-orange-600/4 to-transparent blur-3xl opacity-60" />
+        <div className="absolute top-1/4 -left-64 w-[480px] h-[480px] bg-[#ff5533]/4 rounded-full blur-[120px]" />
+        <div className="absolute bottom-1/3 -right-64 w-[500px] h-[500px] bg-amber-500/4 rounded-full blur-[120px]" />
+      </div>
+
       {/* Top Header */}
       <Header
-        onOpenTutorial={() => setIsTutorialOpen(true)}
         onOpenApiKey={() => setIsApiKeyOpen(true)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenTutorial={() => setIsTutorialOpen(true)}
         hasGeminiKey={hasGeminiKey}
         totalAssetsCount={assets.length}
         completedCount={completedCount}
+        themeColor={settings.themeColor}
       />
 
-      {/* Main Responsive Grid Layout - Expanded container with optimized compact sidebar */}
-      <main className="flex-1 max-w-[1720px] w-full mx-auto p-4 sm:p-6 lg:p-8">
+      {/* Main Content Area: SEO Metadata Engine */}
+      <main className="flex-1 max-w-[1720px] w-full mx-auto p-3 sm:p-6 lg:p-8 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6 lg:gap-8 items-start">
-          {/* Left Column: Generation Controls (compact 3 cols on xl, 4 on lg) */}
+          {/* Left Column: Generation Controls */}
           <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-6 sticky top-20">
             <GenerationControls
               settings={settings}
@@ -1017,7 +1087,7 @@ export default function App() {
             />
           </div>
 
-          {/* Right Column: Upload Section + Generated Metadata List (9 cols on xl, 8 on lg) */}
+          {/* Right Column: Upload Section + Generated Metadata List */}
           <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-6 lg:gap-8">
             {/* Top Card: Upload Files */}
             <UploadSection
@@ -1057,6 +1127,7 @@ export default function App() {
               selectedMarketplace={selectedMarketplace}
               isGenerating={isGenerating}
               authorName={settings.authorName}
+              themeColor={settings.themeColor}
             />
           </div>
         </div>
@@ -1092,7 +1163,7 @@ export default function App() {
         customApiKey={settings.customApiKey}
         apiKeys={settings.apiKeys || []}
         onSelectProvider={(prov) => {
-          const defaultM = prov === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-2.5-flash';
+          const defaultM = prov === 'Groq Cloud' ? 'meta-llama/llama-4-scout-17b-16e-instruct' : 'gemini-4-hydrogen';
           setSettings((prev) => ({ ...prev, aiProvider: prov, model: defaultM }));
         }}
         onSelectModel={(modelId) => {

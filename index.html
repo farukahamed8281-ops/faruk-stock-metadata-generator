@@ -15,10 +15,47 @@
     <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      (function() {
+        try {
+          var _nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() {
+              return _nativeFetch;
+            },
+            set: function(fn) {
+              _nativeFetch = fn;
+            }
+          });
+        } catch (e) {
+          try {
+            if (window.Window && window.Window.prototype) {
+              var _desc = Object.getOwnPropertyDescriptor(window.Window.prototype, 'fetch');
+              if (_desc && !_desc.set) {
+                Object.defineProperty(window.Window.prototype, 'fetch', {
+                  configurable: true,
+                  enumerable: true,
+                  get: _desc.get,
+                  set: function(fn) {
+                    Object.defineProperty(this, 'fetch', {
+                      value: fn,
+                      writable: true,
+                      configurable: true,
+                      enumerable: true
+                    });
+                  }
+                });
+              }
+            }
+          } catch (_) {}
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-[#0b0d12] text-gray-100 antialiased selection:bg-orange-500 selection:text-white">
+  <body class="bg-[#0b0d12] text-slate-100 antialiased selection:bg-[#ff5533] selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

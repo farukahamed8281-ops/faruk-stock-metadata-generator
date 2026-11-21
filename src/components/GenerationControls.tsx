@@ -14,10 +14,11 @@ interface GenerationControlsProps {
 }
 
 const PRESET_COLORS = [
-  { name: 'Orange', hex: '#ff5533' },
-  { name: 'Amber', hex: '#f59e0b' },
+  { name: 'Stock Orange', hex: '#ff5533' },
+  { name: 'Amber Gold', hex: '#f59e0b' },
   { name: 'Emerald', hex: '#10b981' },
-  { name: 'Blue', hex: '#3b82f6' },
+  { name: 'Ocean Blue', hex: '#3b82f6' },
+  { name: 'Electric Cyan', hex: '#00F0FF' },
   { name: 'Purple', hex: '#8b5cf6' },
   { name: 'Rose', hex: '#f43f5e' },
 ];
@@ -84,17 +85,24 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
   const activeThemeColor = settings.themeColor || '#ff5533';
 
   return (
-    <div className="bg-[#181b22] border border-[#262c38] rounded-xl p-4 sm:p-5 shadow-lg flex flex-col gap-4 text-gray-200 text-xs">
+    <div className="bg-[#181b22]/95 border border-[#252b38] rounded-2xl p-4 sm:p-5 shadow-[0_12px_36px_rgba(0,0,0,0.55)] backdrop-blur-xl flex flex-col gap-4 text-slate-200 text-xs">
       {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-[#252b37]">
+      <div className="flex items-center justify-between pb-3 border-b border-[#252b38]">
         <h2 className="text-base font-bold text-white tracking-wide flex items-center gap-2">
-          Generation Controls
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{
+              backgroundColor: activeThemeColor,
+              boxShadow: `0 0 8px ${activeThemeColor}`,
+            }}
+          />
+          <span>Generation Controls</span>
         </h2>
         <button
           onClick={onOpenApiKey}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#232936] hover:bg-[#2e3648] text-xs text-gray-300 hover:text-white border border-[#343d4f] transition-all font-semibold cursor-pointer shadow-sm"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#12151b] hover:bg-[#1e2330] text-xs text-gray-300 hover:text-white border border-[#2a3140] hover:border-orange-500/60 transition-all font-semibold cursor-pointer shadow-sm"
         >
-          <Key className="w-3.5 h-3.5 text-orange-400" />
+          <Key className="w-3.5 h-3.5" style={{ color: activeThemeColor }} />
           <span>API Key</span>
         </button>
       </div>
@@ -102,11 +110,18 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
       {/* AI Provider */}
       <div className="flex flex-col gap-1.5" id="ai-provider-control">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
+          <label className="text-xs font-semibold text-white flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5" style={{ color: activeThemeColor }} />
             <span>AI Provider</span>
           </label>
-          <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+          <span
+            className="text-[10px] font-bold px-1.5 py-0.5 rounded border"
+            style={{
+              color: activeThemeColor,
+              backgroundColor: `${activeThemeColor}1a`,
+              borderColor: `${activeThemeColor}55`,
+            }}
+          >
             100% FREE AI
           </span>
         </div>
@@ -116,10 +131,10 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             value={settings.aiProvider || 'Google Gemini'}
             onChange={(e) => {
               const newProv = e.target.value;
-              const defaultM = newProv === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-2.5-flash';
+              const defaultM = newProv === 'Groq Cloud' ? 'meta-llama/llama-4-scout-17b-16e-instruct' : 'gemini-4-hydrogen';
               onUpdateSettings({ aiProvider: newProv, model: defaultM });
             }}
-            className="w-full bg-[#12151b] border border-[#2d3444] rounded-lg px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-orange-500 appearance-none font-medium transition-colors cursor-pointer"
+            className="w-full bg-[#12151b] border border-[#2d3444] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500 appearance-none font-medium transition-colors cursor-pointer"
           >
             <option value="Google Gemini">Google Gemini (100% Free)</option>
             <option value="Groq Cloud">Groq Cloud (100% Free)</option>
@@ -130,8 +145,8 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
 
       {/* AI Model Dropdown Bar */}
       <div className="flex flex-col gap-1.5" id="ai-model-control">
-        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+        <label className="text-xs font-semibold text-white flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5" style={{ color: activeThemeColor }} />
           <span>AI Model</span>
         </label>
         <div className="relative">
@@ -139,22 +154,22 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             id="ai-model-select"
             value={
               settings.model ||
-              (settings.aiProvider === 'Groq Cloud' ? 'llama-3.2-11b-vision-preview' : 'gemini-2.5-flash')
+              (settings.aiProvider === 'Groq Cloud' ? 'meta-llama/llama-4-scout-17b-16e-instruct' : 'gemini-4-hydrogen')
             }
             onChange={(e) => onUpdateSettings({ model: e.target.value })}
-            className="w-full bg-[#12151b] border border-[#2d3444] rounded-lg px-3 pr-8 py-2 text-xs text-gray-200 focus:outline-none focus:border-orange-500 appearance-none font-medium transition-colors cursor-pointer"
+            className="w-full bg-[#12151b] border border-[#2d3444] rounded-lg px-3 pr-8 py-2 text-xs text-white focus:outline-none focus:border-orange-500 appearance-none font-medium transition-colors cursor-pointer"
           >
             {settings.aiProvider === 'Groq Cloud' ? (
               <>
-                <option value="llama-3.2-11b-vision-preview">Llama 3.2 11B Vision (Fast)</option>
+                <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B Vision (Fast)</option>
                 <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile (SEO)</option>
               </>
             ) : (
               <>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended - Fastest & 100% Free)</option>
-                <option value="gemini-3.8-flash">Gemini 3.8 Flash (High-Accuracy Vision)</option>
+                <option value="gemini-4-hydrogen">Gemini 4 Flash / Hydrogen (Recommended - Fastest)</option>
                 <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High Quota)</option>
-                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview (Deep Vision Analysis)</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Standard Vision)</option>
+                <option value="gemini-4-neon">Gemini 4 Pro / Neon (Deep Vision Analysis)</option>
               </>
             )}
           </select>
@@ -168,13 +183,16 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
           <div className="flex items-center gap-1.5 text-gray-300 font-medium">
             <span>Concurrent Batches</span>
             <div className="relative group">
-              <Info className="w-3.5 h-3.5 text-gray-500 cursor-pointer" />
-              <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#0d0f14] border border-gray-700 text-gray-300 text-[11px] p-2.5 rounded-lg w-56 shadow-xl leading-relaxed">
+              <Info className="w-3.5 h-3.5 text-gray-400 cursor-pointer" />
+              <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#12151b] border border-[#2d3546] text-gray-300 text-[11px] p-2.5 rounded-lg w-56 shadow-xl leading-relaxed">
                 Processes 2-3 files simultaneously in parallel. If any API hits its quota or rate limit, it automatically pauses for 3.5s and calls the next API key or model.
               </div>
             </div>
           </div>
-          <span className="bg-[#242b38] border border-[#353f52] px-2 py-0.5 rounded text-[11px] font-bold text-gray-200">
+          <span
+            className="bg-[#12151b] border border-[#2d3444] px-2 py-0.5 rounded text-[11px] font-bold"
+            style={{ color: activeThemeColor }}
+          >
             {settings.batchSize || 2}x
           </span>
         </div>
@@ -190,7 +208,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
         />
         <div className="flex justify-between text-[10px] text-gray-400">
           <span>1x (Gentle)</span>
-          <span className="text-orange-400 font-medium">2x - 3x (Parallel)</span>
+          <span className="font-medium" style={{ color: activeThemeColor }}>2x - 3x (Parallel)</span>
           <span>4x (Fast)</span>
         </div>
       </div>
@@ -201,8 +219,8 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
           <div className="flex items-center gap-1.5">
             <span className="text-gray-300 font-medium">Requests Per Minute (RPM)</span>
             <div className="relative group">
-              <Info className="w-3.5 h-3.5 text-gray-500 cursor-pointer" />
-              <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#0d0f14] border border-gray-700 text-gray-300 text-[11px] p-2 rounded w-48 shadow-xl">
+              <Info className="w-3.5 h-3.5 text-gray-400 cursor-pointer" />
+              <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#12151b] border border-[#2d3546] text-gray-300 text-[11px] p-2 rounded w-48 shadow-xl">
                 Rate limit control to avoid hitting provider API quotas.
               </div>
             </div>
@@ -210,7 +228,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             <button
               onClick={() => onUpdateSettings({ rpmEnabled: !settings.rpmEnabled })}
               className={`w-8 h-4.5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                settings.rpmEnabled ? 'bg-orange-600' : 'bg-[#2a303d]'
+                settings.rpmEnabled ? 'bg-[#ff5533]' : 'bg-[#3b4252]'
               }`}
               style={{ backgroundColor: settings.rpmEnabled ? activeThemeColor : undefined }}
             >
@@ -221,7 +239,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
               />
             </button>
           </div>
-          <span className="bg-[#242b38] border border-[#353f52] px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-200">
+          <span className="bg-[#12151b] border border-[#2d3444] px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-300">
             {settings.rpmLimit} / min
           </span>
         </div>
@@ -241,18 +259,19 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
       </div>
 
       {/* Tab Navigation: Metadata | Prompt */}
-      <div className="flex items-center border-b border-[#2a3140] mt-0.5 gap-2">
+      <div className="flex items-center border-b border-[#252b38] mt-0.5 gap-2">
         <button
           onClick={() => onUpdateSettings({ activeTab: 'metadata' })}
           className={`pb-2 px-3 text-xs sm:text-sm font-semibold transition-all relative cursor-pointer ${
             settings.activeTab === 'metadata'
-              ? 'text-orange-500 border-b-2 border-orange-500'
-              : 'text-gray-400 hover:text-gray-200'
+              ? 'border-b-2 text-white'
+              : 'text-gray-400 hover:text-white'
           }`}
-          style={{
-            color: settings.activeTab === 'metadata' ? activeThemeColor : undefined,
-            borderColor: settings.activeTab === 'metadata' ? activeThemeColor : undefined,
-          }}
+          style={
+            settings.activeTab === 'metadata'
+              ? { color: activeThemeColor, borderColor: activeThemeColor }
+              : undefined
+          }
         >
           Metadata
         </button>
@@ -260,13 +279,14 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
           onClick={() => onUpdateSettings({ activeTab: 'prompt' })}
           className={`pb-2 px-3 text-xs sm:text-sm font-semibold transition-all relative cursor-pointer ${
             settings.activeTab === 'prompt'
-              ? 'text-orange-500 border-b-2 border-orange-500'
-              : 'text-gray-400 hover:text-gray-200'
+              ? 'border-b-2 text-white'
+              : 'text-gray-400 hover:text-white'
           }`}
-          style={{
-            color: settings.activeTab === 'prompt' ? activeThemeColor : undefined,
-            borderColor: settings.activeTab === 'prompt' ? activeThemeColor : undefined,
-          }}
+          style={
+            settings.activeTab === 'prompt'
+              ? { color: activeThemeColor, borderColor: activeThemeColor }
+              : undefined
+          }
         >
           Prompt
         </button>
@@ -388,6 +408,39 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             </div>
             <p className="text-[10px] text-gray-400 leading-normal">
               স্বয়ংক্রিয়ভাবে ইমেজের সাবজেক্ট ও মুড বিশ্লেষণ করে ৩–৫টি সেরা বিমূর্ত/অনুভূতিমূলক কিওয়ার্ড (যেমন: <span className="text-amber-300 font-medium">hope, future, innovation, responsibility</span>) ইনজেক্ট করে যা বায়ারদের বাণিজ্যিক সার্চে দ্রুত র‍্যাঙ্ক আনে।
+            </p>
+          </div>
+
+          {/* Full Motion Video Stream (>14MB / 30-250MB Proxy) Toggle */}
+          <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-[#141720] border border-[#272e3d]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-orange-400" />
+                <span className="text-xs font-semibold text-gray-200">Full Video Stream (30–250MB)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateSettings({
+                    deepVideoProxy: !(settings.deepVideoProxy ?? true),
+                  })
+                }
+                className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
+                  (settings.deepVideoProxy ?? true) ? 'bg-[#ff5533]' : 'bg-[#3b4252]'
+                }`}
+                style={{
+                  backgroundColor: (settings.deepVideoProxy ?? true) ? activeThemeColor : undefined,
+                }}
+              >
+                <div
+                  className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                    (settings.deepVideoProxy ?? true) ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-400 leading-normal">
+              ৩০–২৫০MB 4K MP4 বা ProRes MOV ভিডিওর জন্য ৬MB চাঙ্কে সার্ভারে হালকা প্রক্সি বানিয়ে পুরো ভিডিও স্ট্রিম Gemini-তে পাঠায় (অফ করলে লোকাল ৪-ফ্রেম ১৫%–৮৫% স্টোরিবোর্ড দ্রুত কাজ করবে)।
             </p>
           </div>
         </div>
@@ -864,7 +917,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
           </div>
         </div>
 
-        {/* Save Settings Button (as in marked screenshot) */}
+        {/* Save Settings Button */}
         <button
           type="button"
           onClick={() => {
@@ -872,9 +925,13 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
               onSaveSettings();
             }
           }}
-          className="w-full py-2.5 px-4 rounded-lg font-bold text-white text-xs tracking-wide shadow-md hover:brightness-110 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2"
-          style={{ backgroundColor: activeThemeColor }}
+          className="w-full py-2.5 px-4 rounded-xl font-bold text-white text-xs tracking-wide hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+          style={{
+            backgroundColor: activeThemeColor,
+            boxShadow: `0 4px 18px ${activeThemeColor}45`,
+          }}
         >
+          <Sparkles className="w-3.5 h-3.5 text-white" />
           <span>Save Settings</span>
         </button>
       </div>

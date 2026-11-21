@@ -117,14 +117,28 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
     : assets.length + (8 - (assets.length % 8 || 8));
   const slotsArray = Array.from({ length: totalSlotsCount });
 
+  const activeColor = themeColor || '#ff5533';
+
   return (
-    <div className="bg-[#181b22] border border-[#262c38] rounded-2xl p-6 sm:p-7 shadow-xl flex flex-col gap-6 text-gray-200">
+    <div className="bg-[#181b22]/95 border border-[#252b38] rounded-2xl p-6 sm:p-7 shadow-[0_12px_36px_rgba(0,0,0,0.55)] backdrop-blur-xl flex flex-col gap-6 text-slate-200">
       {/* Section Title */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-white tracking-wide">Upload Files</h2>
+        <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
+          <span
+            className="w-2.5 h-2.5 rounded-full"
+            style={{
+              backgroundColor: activeColor,
+              boxShadow: `0 0 10px ${activeColor}`,
+            }}
+          />
+          <span>Upload Files</span>
+        </h2>
+        <span className="text-xs text-gray-400 font-medium hidden sm:inline">
+          High-Speed Batch Ingestion & Sensei Alignment
+        </span>
       </div>
 
-      {/* Marketplaces Preset Bar - 2 rows of 4 buttons matching screenshot */}
+      {/* Marketplaces Preset Bar - 2 rows of 4 buttons */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {marketplaces.map((m) => {
           const isActive = selectedMarketplace === m.id;
@@ -135,9 +149,19 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
               onClick={() => onSelectMarketplace(m.id)}
               className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-sm font-semibold border transition-all cursor-pointer ${
                 isActive
-                  ? 'border-orange-500 bg-[#221c1a] text-orange-400 shadow-[0_0_15px_rgba(249,115,22,0.2)] ring-1 ring-orange-500/50 scale-[1.02]'
-                  : 'border-[#29303d] bg-[#1a1e27] hover:bg-[#232936] text-gray-300 hover:border-gray-600'
+                  ? 'text-white font-bold scale-[1.02]'
+                  : 'border-[#282f3e] bg-[#12151b] hover:bg-[#1c212b] text-gray-400 hover:text-white hover:border-[#384357]'
               }`}
+              style={
+                isActive
+                  ? {
+                      borderColor: activeColor,
+                      backgroundColor: `${activeColor}1f`,
+                      color: '#ffffff',
+                      boxShadow: `0 0 18px ${activeColor}35`,
+                    }
+                  : undefined
+              }
             >
               {m.icon}
               <span>{m.label}</span>
@@ -146,8 +170,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         })}
       </div>
 
-
-      {/* Upload Area: Shows initial 3-icon splash when empty (matching initial theme), or grid when files added */}
+      {/* Upload Area */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -157,9 +180,18 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           assets.length === 0 ? 'p-8 sm:p-12 cursor-pointer' : 'p-3.5 sm:p-4'
         } ${
           isDragOver
-            ? 'border-orange-500 bg-orange-500/5 scale-[0.99]'
-            : 'border-[#29303d] bg-[#12151b] hover:border-[#384357]'
+            ? 'scale-[0.99]'
+            : 'border-[#2c3444] bg-[#12151b]/90 hover:border-orange-500/50 hover:bg-[#141820]'
         }`}
+        style={
+          isDragOver
+            ? {
+                borderColor: activeColor,
+                backgroundColor: `${activeColor}15`,
+                boxShadow: `0 0 25px ${activeColor}30`,
+              }
+            : undefined
+        }
       >
         <input
           type="file"
@@ -171,40 +203,48 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         />
 
         {assets.length === 0 ? (
-          /* Initial Theme Splash matching user's screenshot */
+          /* Initial Theme Splash */
           <div className="flex flex-col items-center justify-center text-center">
-            {/* 3 Icons matching screenshot: Image (orange), Videos (purple), EPS (pink) */}
             <div className="flex items-center justify-center gap-8 sm:gap-10 mb-5">
               {/* Image Icon */}
               <div className="flex flex-col items-center gap-1.5">
-                <div className="w-10 h-10 flex items-center justify-center text-orange-500">
-                  <ImageIcon className="w-9 h-9 stroke-[2.2]" />
+                <div
+                  className="w-11 h-11 rounded-xl border flex items-center justify-center shadow-md"
+                  style={{
+                    backgroundColor: `${activeColor}18`,
+                    borderColor: `${activeColor}45`,
+                    color: activeColor,
+                  }}
+                >
+                  <ImageIcon className="w-6 h-6 stroke-[2.2]" />
                 </div>
-                <span className="text-xs font-semibold text-orange-500">Image</span>
+                <span className="text-xs font-bold" style={{ color: activeColor }}>Image</span>
               </div>
 
               {/* Videos Icon */}
               <div className="flex flex-col items-center gap-1.5">
-                <div className="w-10 h-10 flex items-center justify-center text-blue-500">
-                  <VideoIcon className="w-9 h-9 stroke-[2.2]" />
+                <div className="w-11 h-11 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md">
+                  <VideoIcon className="w-6 h-6 stroke-[2.2]" />
                 </div>
-                <span className="text-xs font-semibold text-blue-500">Videos</span>
+                <span className="text-xs font-bold text-amber-400">Videos</span>
               </div>
 
               {/* EPS Icon */}
               <div className="flex flex-col items-center gap-1.5">
-                <div className="w-10 h-10 flex items-center justify-center text-pink-500">
-                  <Code className="w-9 h-9 stroke-[2.2]" />
+                <div className="w-11 h-11 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 shadow-md">
+                  <Code className="w-6 h-6 stroke-[2.2]" />
                 </div>
-                <span className="text-xs font-semibold text-pink-500">EPS</span>
+                <span className="text-xs font-bold text-purple-400">EPS</span>
               </div>
             </div>
 
-            <p className="text-sm font-semibold text-gray-200">
+            <p className="text-sm font-semibold text-white">
               Drag & drop files here, or{' '}
-              <span className="text-cyan-400 font-medium hover:underline">click to select</span>
+              <span className="font-bold hover:underline cursor-pointer" style={{ color: activeColor }}>
+                click to select
+              </span>
             </p>
-            <p className="text-xs text-gray-500 mt-1.5 font-medium">
+            <p className="text-xs text-gray-400 mt-1.5 font-medium">
               Supported: JPG, PNG, GIF, MP4, MOV, EPS, AI, PDF
             </p>
           </div>
@@ -289,10 +329,10 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
                   key={`empty-slot-${index}`}
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full aspect-square rounded-md border border-[#212735] bg-[#14171f]/80 hover:border-[#3a475e] hover:bg-[#1b212c] transition-all cursor-pointer flex items-center justify-center group focus:outline-none"
+                  className="w-full aspect-square rounded-lg border border-[#282f3e] bg-[#161a22]/80 hover:border-orange-500/60 hover:bg-[#1e2330] transition-all cursor-pointer flex items-center justify-center group focus:outline-none shadow-sm"
                   title="Click to upload more files"
                 >
-                  <Plus className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                  <Plus className="w-3.5 h-3.5 text-gray-500 group-hover:text-orange-400 transition-colors" />
                 </button>
               );
             })}
@@ -300,86 +340,91 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         )}
       </div>
 
-      {/* Generation Progress Bar & Status Text (Matching second screenshot) */}
+      {/* Generation Progress Bar & Status Text */}
       {(isGenerating || progressPercent > 0) && (
         <div className="flex flex-col gap-1.5 px-0.5 animate-in fade-in">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-300 font-medium truncate max-w-[80%]">
-              {statusMessage || 'Processing stock metadata...'}
+            <span className="text-slate-300 font-medium truncate max-w-[80%] flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full animate-ping"
+                style={{ backgroundColor: activeColor }}
+              />
+              <span>{statusMessage || 'Processing stock metadata...'}</span>
             </span>
-            <span className="font-mono font-bold text-orange-400" style={{ color: themeColor }}>
+            <span className="font-mono font-bold" style={{ color: activeColor }}>
               {Math.round(progressPercent)}%
             </span>
           </div>
-          <div className="w-full h-1.5 bg-[#202634] rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-[#12151b] border border-[#252b38] rounded-full overflow-hidden shadow-inner">
             <div
               className="h-full transition-all duration-300 rounded-full"
               style={{
                 width: `${Math.min(100, Math.max(2, progressPercent))}%`,
-                backgroundColor: themeColor,
+                backgroundColor: activeColor,
+                boxShadow: `0 0 12px ${activeColor}`,
               }}
             />
           </div>
         </div>
       )}
 
-      {/* Bottom Action Bar matching exact colors in screenshot - enlarged touch and click targets */}
+      {/* Bottom Action Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
-        {/* Clear All - Red */}
+        {/* Clear All - Ruby Glass */}
         <button
           type="button"
           onClick={onClearAll}
           disabled={assets.length === 0 || isGenerating}
-          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#d32f2f] hover:bg-[#b71c1c] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
+          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-rose-950/70 hover:bg-rose-900 border border-rose-500/40 hover:border-rose-400 disabled:opacity-40 disabled:cursor-not-allowed text-rose-200 hover:text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
         >
           <Trash2 className="w-4.5 h-4.5" />
           <span>Clear All</span>
         </button>
 
-        {/* Pause - Yellow/Amber */}
+        {/* Pause - Amber Glass */}
         <button
           type="button"
           onClick={onTogglePause}
           disabled={!isGenerating}
-          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#a37000] hover:bg-[#855b00] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
+          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-amber-950/70 hover:bg-amber-900 border border-amber-500/40 hover:border-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-amber-200 hover:text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
         >
           {isPaused ? <Play className="w-4.5 h-4.5" /> : <Pause className="w-4.5 h-4.5" />}
           <span>{isPaused ? 'Resume' : 'Pause'}</span>
         </button>
 
-        {/* Generate - Orange/Copper */}
+        {/* Generate - Primary Orange / Theme Color */}
         <button
           type="button"
           onClick={onGenerate}
           disabled={isGenerating || assets.length === 0}
-          className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-white text-sm font-bold transition-all shadow-lg cursor-pointer active:scale-95 ${
-            isGenerating
-              ? 'bg-[#b84d28] opacity-90'
-              : 'bg-[#b84d28] hover:bg-[#a1401f] shadow-orange-950/40'
-          } disabled:opacity-40 disabled:cursor-not-allowed`}
+          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-white text-sm font-extrabold transition-all hover:brightness-110 cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
+          style={{
+            backgroundColor: activeColor,
+            boxShadow: `0 4px 20px ${activeColor}50`,
+          }}
         >
-          <Sparkles className={`w-4.5 h-4.5 ${isGenerating ? 'animate-spin' : ''}`} />
+          <Sparkles className={`w-4.5 h-4.5 text-white ${isGenerating ? 'animate-spin' : ''}`} />
           <span>{isGenerating ? 'Generating' : `Generate (${pendingCount > 0 ? pendingCount : assets.length})`}</span>
         </button>
 
-        {/* Export CSV - Green */}
+        {/* Export CSV - Emerald Glass */}
         <button
           type="button"
           onClick={onExportCsv}
           disabled={completedCount === 0}
-          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#2e7d32] hover:bg-[#236026] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
+          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#0b231b] hover:bg-[#103227] border border-emerald-500/50 hover:border-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-emerald-300 hover:text-white text-sm font-extrabold transition-all shadow-md cursor-pointer active:scale-95"
         >
           <Download className="w-4.5 h-4.5" />
           <span>Export CSV</span>
         </button>
 
-        {/* History - Slate/Gray */}
+        {/* History - Dark Slate */}
         <button
           type="button"
           onClick={onOpenHistory}
-          className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#424c5e] hover:bg-[#343c4a] text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
+          className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#12151b] hover:bg-[#1e2330] border border-[#283040] hover:border-orange-500/60 text-gray-300 hover:text-white text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95"
         >
-          <Clock className="w-4.5 h-4.5" />
+          <Clock className="w-4.5 h-4.5" style={{ color: activeColor }} />
           <span>History</span>
         </button>
       </div>

@@ -41,12 +41,12 @@ const PROVIDERS: ProviderConfig[] = [
     badge: '100% FREE & RECOMMENDED',
     portalName: 'Google AI Studio',
     description: "Google's official free multimodal AI for deep image vision, microstock SEO & top 1-5 keyword ranking",
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'gemini-4-hydrogen',
     models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Recommended - Fastest & 100% Free)', vision: true },
-      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (High-Accuracy Multimodal Vision)', vision: true },
+      { id: 'gemini-4-hydrogen', name: 'Gemini 4 Flash / Hydrogen (Active - Fastest & Multimodal Vision)', vision: true },
       { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite (High Free RPM Quota)', vision: true },
-      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Deep Vision Analysis)', vision: true },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Standard Compatibility)', vision: true },
+      { id: 'gemini-4-neon', name: 'Gemini 4 Pro / Neon (Deep Vision Analysis)', vision: true },
     ],
     supportsVision: true,
     getKeyUrl: 'https://aistudio.google.com/app/apikey',
@@ -65,11 +65,11 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Groq Cloud',
     badge: '100% FREE & ULTRA-FAST',
     portalName: 'Groq Console',
-    description: 'Ultra-high speed LPU inference with free tier for Llama-3.2 Vision and Llama-3.3 microstock SEO',
-    defaultModel: 'llama-3.2-11b-vision-preview',
+    description: 'Ultra-high speed LPU inference with free tier for Llama 4 Scout Vision and Llama 3.3 microstock SEO',
+    defaultModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
     models: [
-      { id: 'llama-3.2-11b-vision-preview', name: 'Llama 3.2 11B Vision (Free Fast Vision)', vision: true },
-      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Free High Intelligence SEO)', vision: false },
+      { id: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout 17B Vision (Free Fast Vision)', vision: true },
+      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (High Intelligence SEO)', vision: false },
     ],
     supportsVision: true,
     getKeyUrl: 'https://console.groq.com/keys',
@@ -188,15 +188,6 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     } catch {}
     onSaveApiKey(updated[0] || '');
     if (onSaveApiKeys) onSaveApiKeys(updated);
-
-    // Sync each key with server pool as well
-    updated.forEach((k) => {
-      fetch('/api/keys-pool', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: k }),
-      }).catch(() => {});
-    });
   };
 
   const handleAddKey = async () => {
@@ -532,9 +523,13 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 <div className="p-4 rounded-xl bg-[#171b24] border border-[#273042] flex items-center justify-between text-xs text-gray-400">
                   <div className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-orange-400" />
-                    <span>Default System Built-in Key is currently active.</span>
+                    <span>
+                      {hasGeminiKey
+                        ? 'Add your own API Key above for private per-user AI Vision.'
+                        : 'No personal API Key added yet. Add your own free API Key above.'}
+                    </span>
                   </div>
-                  <span className="text-emerald-400 font-semibold">Active</span>
+                  <span className="text-orange-400 font-semibold">Private Mode</span>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">

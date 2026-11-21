@@ -1,13 +1,14 @@
 import { Marketplace, StockAsset } from '../types';
 import { generateRenamedFilename } from './zipExporter';
+import { normalizeCategoryForMarketplace, truncateAtWordBoundary } from './stockSeoSanitizer';
 
-export function exportAssetsToCsv(
+export function generateCsvContent(
   assets: StockAsset[],
   marketplace: Marketplace = 'Adobe Stock',
   targetExtension?: string,
   autoRenameToTitle: boolean = true
-): void {
-  if (!assets || assets.length === 0) return;
+): string {
+  if (!assets || assets.length === 0) return '';
 
   let csvContent = '';
   const sanitize = (text: string) => {
@@ -26,64 +27,80 @@ export function exportAssetsToCsv(
   };
 
   if (marketplace === 'Adobe Stock') {
-    // Adobe Stock CSV Standard:
-    // Filename, Title, Keywords, Category
     const headers = ['Filename', 'Title', 'Keywords', 'Category'];
     const rows = assets.map((asset) => {
-      const keywordsStr = (asset.keywords || []).join(', ');
+      const keywordsStr = (asset.keywords || []).slice(0, 49).join(', ');
+      const adobeCat = normalizeCategoryForMarketplace(asset.category, 'Adobe Stock');
       return [
         sanitize(getExportFilename(asset)),
-        sanitize(asset.title || asset.filename),
+        sanitize(truncateAtWordBoundary(asset.title || asset.filename, 200)),
         sanitize(keywordsStr),
-        sanitize(asset.category || 'Graphic Resources'),
+        sanitize(adobeCat),
       ].join(',');
     });
     csvContent = [headers.join(','), ...rows].join('\r\n');
   } else if (marketplace === 'Shutterstock') {
-    // Shutterstock CSV Standard:
-    // Filename, Description, Keywords, Categories, Editorial, Mature Content, Illustration
     const headers = ['Filename', 'Description', 'Keywords', 'Categories', 'Editorial', 'Mature'];
     const rows = assets.map((asset) => {
-      const keywordsStr = (asset.keywords || []).join(', ');
+      const keywordsStr = (asset.keywords || []).slice(0, 50).join(', ');
+      // On Shutterstock, Description IS the primary searchable title (up to 200 chars).
+      // Pick the richer descriptive field so it is never crippled at 57 chars.
+      const primaryDesc =
+        asset.description && asset.description.length >= (asset.title?.length || 0)
+          ? asset.description
+          : asset.title || asset.description || asset.filename;
+      const ssDesc = truncateAtWordBoundary(primaryDesc, 200);
+      const ssCat = normalizeCategoryForMarketplace(asset.category, 'Shutterstock');
       return [
         sanitize(getExportFilename(asset)),
-        sanitize(asset.description || asset.title || asset.filename),
+        sanitize(ssDesc),
         sanitize(keywordsStr),
-        sanitize(asset.category || 'Abstract'),
+        sanitize(ssCat),
         '"no"',
         '"no"',
       ].join(',');
     });
     csvContent = [headers.join(','), ...rows].join('\r\n');
   } else if (marketplace === 'Magnific') {
-    // Magnific CSV:
-    // File, Title, Tags
-    const headers = ['File', 'Title', 'Tags'];
+    // Freepik / Magnific Contributor official CSV schema
+    const headers = ['Filename', 'Title', 'Keywords'];
     const rows = assets.map((asset) => {
-      const tagsStr = (asset.keywords || []).map((k) => k.toLowerCase()).join(',');
+      const keywordsStr = (asset.keywords || []).slice(0, 50).map((k) => k.toLowerCase()).join(', ');
       return [
         sanitize(getExportFilename(asset)),
-        sanitize(asset.title || asset.filename),
-        sanitize(tagsStr),
+        sanitize(truncateAtWordBoundary(asset.title || asset.filename, 200)),
+        sanitize(keywordsStr),
       ].join(',');
     });
     csvContent = [headers.join(','), ...rows].join('\r\n');
   } else {
-    // Universal General CSV
     const headers = ['Filename', 'Title', 'Description', 'Keywords', 'Category', 'Platform'];
     const rows = assets.map((asset) => {
       const keywordsStr = (asset.keywords || []).join(', ');
+      const normalizedCat = normalizeCategoryForMarketplace(asset.category, marketplace);
       return [
         sanitize(getExportFilename(asset)),
         sanitize(asset.title),
         sanitize(asset.description),
         sanitize(keywordsStr),
-        sanitize(asset.category),
+        sanitize(normalizedCat),
         sanitize(marketplace),
       ].join(',');
     });
     csvContent = [headers.join(','), ...rows].join('\r\n');
   }
+
+  return csvContent;
+}
+
+export function exportAssetsToCsv(
+  assets: StockAsset[],
+  marketplace: Marketplace = 'Adobe Stock',
+  targetExtension?: string,
+  autoRenameToTitle: boolean = true
+): void {
+  const csvContent = generateCsvContent(assets, marketplace, targetExtension, autoRenameToTitle);
+  if (!csvContent) return;
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
