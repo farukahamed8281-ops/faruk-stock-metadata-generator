@@ -207,6 +207,9 @@ const MAX_DIRECT_VIDEO_BYTES = 14 * 1024 * 1024; // 14MB raw (~19MB base64 inlin
 const CHUNKED_PROXY_MAX_BYTES = 250 * 1024 * 1024; // 250MB max via 6MB chunked server ffmpeg proxy
 const VIDEO_CHUNK_SIZE = 6 * 1024 * 1024; // 6MB slices (well under Cloud Run 32MB request cap)
 
+// Remembers static-host deployments (e.g. Vercel SPA rewrite returning 404/405/HTML for /api/*)
+let isStaticHostMode = false;
+
 function getNormalizedVideoMime(file: File): string {
   const lower = file.name.toLowerCase();
   if (lower.endsWith('.mov')) return 'video/quicktime';
@@ -474,7 +477,7 @@ async function prepareServerVideoProxy(
   previewFrame?: string;
   meta: MediaInspectionMeta;
 } | null> {
-  if (!file || file.size <= 0 || file.size > CHUNKED_PROXY_MAX_BYTES) {
+  if (isStaticHostMode || !file || file.size <= 0 || file.size > CHUNKED_PROXY_MAX_BYTES) {
     return null;
   }
 
@@ -496,6 +499,9 @@ async function prepareServerVideoProxy(
         body: chunkSlice,
       });
       if (!chunkResp.ok) {
+        if (chunkResp.status === 404 || chunkResp.status === 405) {
+          isStaticHostMode = true;
+        }
         return null;
       }
     }
@@ -842,7 +848,11 @@ Output ONLY valid JSON matching this schema:
           continue;
         }
 
-        if (response.status === 401 || response.status === 403 || (response.status === 400 && errorMsg.toLowerCase().includes('api_key'))) {
+        if (
+          response.status === 401 ||
+          (response.status === 403 && !errorMsg.toLowerCase().includes('model')) ||
+          (response.status === 400 && errorMsg.toLowerCase().includes('api_key'))
+        ) {
           clientKeyCooldownUntil.set(apiKey.trim(), Date.now() + 600_000);
           throw lastError;
         }
@@ -1195,88 +1205,100 @@ export async function generateMetadataForAsset(
   ];
   const orderedCandidateKeys = prioritizeHealthyClientKeys(rotatedKeys);
 
-  // 1. Try Backend API first
-  let shouldFallbackToDirectClient = false;
+  // 1. Try Backend API first (skip immediately if static hosting like Vercel already detected)
+  let shouldFallbackToDirectClient = isStaticHostMode;
   let serverErrorMessage = '';
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), (videoData || videoProxyId) ? 75000 : 35000);
+  if (!shouldFallbackToDirectClient) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), (videoData || videoProxyId) ? 75000 : 35000);
 
-    const res = await fetch('/api/generate-metadata', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        filename: asset.filename,
-        fileType: asset.fileType,
-        imageData,
-        videoData,
-        videoProxyId,
-        mediaContext,
-        aiProvider: settings.aiProvider,
-        model: settings.model,
-        marketplace,
-        titleLength: settings.titleLength,
-        descLength: settings.descLength,
-        keywordsCount: settings.keywordsCount,
-        customPrompt: settings.customPrompt,
-        category: asset.category,
-        topic: asset.topic || settings.defaultTopic,
-        offlineMode: false,
-        apiKey: orderedCandidateKeys[0],
-        apiKeys: orderedCandidateKeys,
-        advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
-        advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
-        advanceVector: asset.advanceVector ?? settings.advanceVector,
-        advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
-        includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
-      }),
-    });
+      const res = await fetch('/api/generate-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          filename: asset.filename,
+          fileType: asset.fileType,
+          imageData,
+          videoData,
+          videoProxyId,
+          mediaContext,
+          aiProvider: settings.aiProvider,
+          model: settings.model,
+          marketplace,
+          titleLength: settings.titleLength,
+          descLength: settings.descLength,
+          keywordsCount: settings.keywordsCount,
+          customPrompt: settings.customPrompt,
+          category: asset.category,
+          topic: asset.topic || settings.defaultTopic,
+          offlineMode: false,
+          apiKey: orderedCandidateKeys[0],
+          apiKeys: orderedCandidateKeys,
+          advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
+          advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
+          advanceVector: asset.advanceVector ?? settings.advanceVector,
+          advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
+          includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
+        }),
+      });
 
-    clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
 
-    const data = await res.json().catch(() => ({}));
+      const contentType = res.headers.get('content-type') || '';
+      const isJsonResponse = contentType.includes('application/json');
+      const data = isJsonResponse ? await res.json().catch(() => ({})) : {};
 
-    if (res.ok && data && (data.title || data.keywords)) {
-      let finalTitle = sanitizeTitle((data.title || asset.filename).trim());
-      if (settings.titleLength > 0 && finalTitle.length > settings.titleLength) {
-        finalTitle = truncateAtWordBoundary(finalTitle.replace(/\.+$/, ''), settings.titleLength - 1);
-        finalTitle = sanitizeTitle(finalTitle);
+      if (res.ok && data && (data.title || data.keywords)) {
+        let finalTitle = sanitizeTitle((data.title || asset.filename).trim());
+        if (settings.titleLength > 0 && finalTitle.length > settings.titleLength) {
+          finalTitle = truncateAtWordBoundary(finalTitle.replace(/\.+$/, ''), settings.titleLength - 1);
+          finalTitle = sanitizeTitle(finalTitle);
+        }
+
+        let finalDesc = '';
+        if (settings.descLength > 0 && data.description) {
+          finalDesc = truncateAtWordBoundary(sanitizeTitle(data.description.trim()), settings.descLength);
+        }
+
+        const rawKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
+        const finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30, marketplace);
+
+        return {
+          ...data,
+          title: finalTitle,
+          rawTitle: data.rawTitle || finalTitle,
+          description: finalDesc,
+          rawDescription: data.rawDescription || data.description || '',
+          keywords: finalKeywords,
+          rawKeywords: data.rawKeywords || data.keywords || finalKeywords,
+          conceptualKeywords: Array.isArray(data.conceptualKeywords) ? data.conceptualKeywords : undefined,
+          category: normalizeCategoryForMarketplace(data.category || asset.category, marketplace),
+          ...(resolvedPreviewUrl ? { resolvedPreviewUrl } : {}),
+        };
       }
 
-      let finalDesc = '';
-      if (settings.descLength > 0 && data.description) {
-        finalDesc = truncateAtWordBoundary(sanitizeTitle(data.description.trim()), settings.descLength);
+      // Static hosts (Vercel, Netlify, Cloudflare Pages) return 404/405/HTML for /api/* POST requests
+      if (
+        res.status === 404 ||
+        res.status === 405 ||
+        res.status === 501 ||
+        !isJsonResponse
+      ) {
+        isStaticHostMode = true;
+        shouldFallbackToDirectClient = true;
+      } else if (res.status === 502 || res.status === 503 || res.status === 504) {
+        shouldFallbackToDirectClient = true;
+      } else {
+        serverErrorMessage = data?.error || `Server error (${res.status})`;
       }
-
-      const rawKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
-      const finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30, marketplace);
-
-      return {
-        ...data,
-        title: finalTitle,
-        rawTitle: data.rawTitle || finalTitle,
-        description: finalDesc,
-        rawDescription: data.rawDescription || data.description || '',
-        keywords: finalKeywords,
-        rawKeywords: data.rawKeywords || data.keywords || finalKeywords,
-        conceptualKeywords: Array.isArray(data.conceptualKeywords) ? data.conceptualKeywords : undefined,
-        category: normalizeCategoryForMarketplace(data.category || asset.category, marketplace),
-        ...(resolvedPreviewUrl ? { resolvedPreviewUrl } : {}),
-      };
-    }
-
-    // If backend does not exist (404 static hosting) or proxy error (502/503/504), allow direct client fallback
-    if (res.status === 404 || res.status === 502 || res.status === 503 || res.status === 504) {
+    } catch (backendErr: any) {
+      // Network error / static host without Express backend / aborted
       shouldFallbackToDirectClient = true;
-    } else {
-      serverErrorMessage = data?.error || `Server error (${res.status})`;
+      serverErrorMessage = backendErr?.message || 'Backend connection failed';
     }
-  } catch (backendErr: any) {
-    // Network error / static host without Express backend / aborted
-    shouldFallbackToDirectClient = true;
-    serverErrorMessage = backendErr?.message || 'Backend connection failed';
   }
 
   if (!shouldFallbackToDirectClient && serverErrorMessage) {
@@ -1342,3 +1364,143 @@ export async function generateMetadataForAsset(
 
   throw new Error(`AI Generation Error: ${lastDirectError?.message || serverErrorMessage || 'API key rejected or quota exhausted.'}`);
 }
+
+// Unified Reverse AI Image-to-Prompt Generator (Server-first with direct Gemini fallback for static hosts like Vercel)
+export async function generateImagePromptForAsset(params: {
+  filename: string;
+  imageData?: string;
+  category?: string;
+  targetGenerator?: string;
+  aspectRatio?: string;
+  detailLevel?: string;
+  customInstructions?: string;
+  apiKeys?: string[];
+  customApiKey?: string;
+  model?: string;
+}): Promise<{
+  mainPrompt: string;
+  geminiPrompt: string;
+  flowPrompt: string;
+  midjourneyPrompt: string;
+  dallePrompt: string;
+  fluxPrompt: string;
+  negativePrompt: string;
+}> {
+  const candidateKeys: string[] = [];
+  if (Array.isArray(params.apiKeys)) {
+    params.apiKeys.forEach((k) => {
+      if (k && typeof k === 'string' && k.trim().length > 5 && !candidateKeys.includes(k.trim())) {
+        candidateKeys.push(k.trim());
+      }
+    });
+  }
+  if (params.customApiKey && params.customApiKey.trim().length > 5 && !candidateKeys.includes(params.customApiKey.trim())) {
+    candidateKeys.push(params.customApiKey.trim());
+  }
+
+  const orderedKeys = prioritizeHealthyClientKeys(candidateKeys);
+
+  if (!isStaticHostMode) {
+    try {
+      const res = await fetch('/api/generate-image-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: params.filename,
+          imageData: params.imageData,
+          category: params.category,
+          targetGenerator: params.targetGenerator || 'gemini',
+          aspectRatio: params.aspectRatio || '16:9',
+          detailLevel: params.detailLevel || 'standard',
+          customInstructions: params.customInstructions || '',
+          apiKey: orderedKeys[0],
+          apiKeys: orderedKeys,
+        }),
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data?.mainPrompt) return data;
+      } else if (res.status === 404 || res.status === 405 || res.status === 501 || !contentType.includes('application/json')) {
+        isStaticHostMode = true;
+      }
+    } catch {
+      // Fallback to direct Gemini
+    }
+  }
+
+  const aspectRatio = params.aspectRatio || '16:9';
+  const targetGenerator = params.targetGenerator || 'gemini';
+  const detailLevel = params.detailLevel || 'standard';
+
+  const geminiKeys = orderedKeys.filter((k) => !k.startsWith('gsk_'));
+  if (geminiKeys.length > 0 && params.imageData && params.imageData.includes('base64')) {
+    const promptText = `Analyze this stock image carefully and write high-precision generative AI reproduction prompts.
+Target Engine: ${targetGenerator}, Aspect Ratio: ${aspectRatio}, Detail Level: ${detailLevel}.
+${params.customInstructions ? `Notes: ${params.customInstructions}` : ''}
+Output ONLY valid JSON with keys: "mainPrompt", "geminiPrompt", "flowPrompt", "midjourneyPrompt", "dallePrompt", "fluxPrompt", "negativePrompt".`;
+
+    const [header, base64] = params.imageData.split(';base64,');
+    const mimeType = header ? header.replace('data:', '') : 'image/jpeg';
+    const parts = [
+      { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64 } },
+      { text: promptText },
+    ];
+
+    const chosenModel = params.model && params.model.startsWith('gemini-') ? params.model : 'gemini-4-hydrogen';
+    const modelsToTry = [chosenModel, 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'].filter(
+      (m, idx, arr) => arr.indexOf(m) === idx
+    );
+
+    for (const key of geminiKeys) {
+      for (const m of modelsToTry) {
+        try {
+          const resp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${encodeURIComponent(key)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts }],
+                generationConfig: { responseMimeType: 'application/json' },
+              }),
+            }
+          );
+          if (!resp.ok) {
+            if (resp.status === 429) {
+              clientKeyCooldownUntil.set(key, Date.now() + 45_000);
+              break;
+            }
+            continue;
+          }
+          const json = await resp.json();
+          const parsed = extractJson(json?.candidates?.[0]?.content?.parts?.[0]?.text || '');
+          if (parsed?.mainPrompt) {
+            return {
+              mainPrompt: parsed.mainPrompt || '',
+              geminiPrompt: parsed.geminiPrompt || parsed.mainPrompt || '',
+              flowPrompt: parsed.flowPrompt || parsed.mainPrompt || '',
+              midjourneyPrompt: parsed.midjourneyPrompt || `${parsed.mainPrompt} --ar ${aspectRatio} --v 6.0`,
+              dallePrompt: parsed.dallePrompt || parsed.mainPrompt || '',
+              fluxPrompt: parsed.fluxPrompt || parsed.mainPrompt || '',
+              negativePrompt: parsed.negativePrompt || 'blurry, low quality, watermark, text, distorted',
+            };
+          }
+        } catch {}
+      }
+    }
+  }
+
+  const cleanName = params.filename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').trim() || 'commercial stock scene';
+  const basePrompt = `High quality commercial stock photograph of ${cleanName}, studio lighting, clean composition, sharp focus, 8k resolution`;
+  return {
+    mainPrompt: basePrompt,
+    geminiPrompt: `${basePrompt}, shot on 85mm lens f/1.8, natural volumetric light, clear background separation.`,
+    flowPrompt: `Flow AI: ${basePrompt}, crisp commercial microstock aesthetic, balanced negative space.`,
+    midjourneyPrompt: `${basePrompt} --ar ${aspectRatio} --v 6.0 --style raw --stylize 250`,
+    dallePrompt: `A high-resolution commercial photograph of ${cleanName} with diffused studio lighting and clean framing.`,
+    fluxPrompt: `Cinematic photo of ${cleanName}, photorealistic textures, natural lighting, 8k uhd.`,
+    negativePrompt: 'blurry, low quality, distorted anatomy, text, watermark, signature, artifacts',
+  };
+}
+

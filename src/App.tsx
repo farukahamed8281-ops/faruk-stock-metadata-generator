@@ -18,7 +18,7 @@ import { exportAssetsToCsv } from './utils/csvExporter';
 import { exportAssetsToZip, generateRenamedFilename } from './utils/zipExporter';
 import { downloadSingleAssetWithMetadata } from './utils/metadataEmbedder';
 import { getMarketplaceSeoProfile } from './utils/marketplacePrompts';
-import { generateMetadataForAsset, fileToFastThumbnail } from './services/aiMetadataService';
+import { generateMetadataForAsset, generateImagePromptForAsset, fileToFastThumbnail } from './services/aiMetadataService';
 import {
   sanitizeTitle,
   alignKeywordsWithTitle,
@@ -519,12 +519,16 @@ export default function App() {
     });
   };
 
-  // Check health on mount
+  // Check health on mount (ignore HTML rewrites on static hosts like Vercel)
   useEffect(() => {
     fetch('/api/health')
-      .then((r) => r.json())
+      .then((r) => {
+        const ct = r.headers.get('content-type') || '';
+        if (!r.ok || !ct.includes('application/json')) return { hasGeminiKey: false };
+        return r.json();
+      })
       .then((data) => {
-        setHasGeminiKey(Boolean(data.hasGeminiKey));
+        setHasGeminiKey(Boolean(data?.hasGeminiKey));
       })
       .catch(() => {
         setHasGeminiKey(false);
@@ -671,24 +675,18 @@ export default function App() {
         imageData = await fileToAiThumbnailBase64(target.file);
       }
 
-      const res = await fetch('/api/generate-image-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: target.filename,
-          imageData,
-          category: target.category,
-          targetGenerator: settings.targetPromptGenerator,
-          aspectRatio: settings.promptAspectRatio,
-          detailLevel: settings.promptDetailLevel,
-          customInstructions: settings.customPrompt,
-          apiKey: settings.customApiKey,
-          apiKeys: settings.apiKeys || (settings.customApiKey ? [settings.customApiKey] : []),
-        }),
+      const data = await generateImagePromptForAsset({
+        filename: target.filename,
+        imageData,
+        category: target.category,
+        targetGenerator: settings.targetPromptGenerator,
+        aspectRatio: settings.promptAspectRatio,
+        detailLevel: settings.promptDetailLevel,
+        customInstructions: settings.customPrompt,
+        apiKeys: settings.apiKeys,
+        customApiKey: settings.customApiKey,
+        model: settings.model,
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to extract prompt');
 
       handleUpdateAsset(id, {
         promptGenerating: false,
@@ -723,33 +721,28 @@ export default function App() {
           imageData = await fileToAiThumbnailBase64(asset.file);
         }
 
-        const res = await fetch('/api/generate-image-prompt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: asset.filename,
-            imageData,
-            category: asset.category,
-            targetGenerator: settings.targetPromptGenerator,
-            aspectRatio: settings.promptAspectRatio,
-            detailLevel: settings.promptDetailLevel,
-            customInstructions: settings.customPrompt,
-            apiKey: settings.customApiKey,
-          }),
+        const data = await generateImagePromptForAsset({
+          filename: asset.filename,
+          imageData,
+          category: asset.category,
+          targetGenerator: settings.targetPromptGenerator,
+          aspectRatio: settings.promptAspectRatio,
+          detailLevel: settings.promptDetailLevel,
+          customInstructions: settings.customPrompt,
+          apiKeys: settings.apiKeys,
+          customApiKey: settings.customApiKey,
+          model: settings.model,
         });
 
-        const data = await res.json();
-        if (res.ok) {
-          handleUpdateAsset(asset.id, {
-            imagePrompt: data.mainPrompt || '',
-            geminiPrompt: data.geminiPrompt || '',
-            flowPrompt: data.flowPrompt || '',
-            midjourneyPrompt: data.midjourneyPrompt || '',
-            dallePrompt: data.dallePrompt || '',
-            fluxPrompt: data.fluxPrompt || '',
-            negativePrompt: data.negativePrompt || '',
-          });
-        }
+        handleUpdateAsset(asset.id, {
+          imagePrompt: data.mainPrompt || '',
+          geminiPrompt: data.geminiPrompt || '',
+          flowPrompt: data.flowPrompt || '',
+          midjourneyPrompt: data.midjourneyPrompt || '',
+          dallePrompt: data.dallePrompt || '',
+          fluxPrompt: data.fluxPrompt || '',
+          negativePrompt: data.negativePrompt || '',
+        });
       } catch (err) {
         console.warn(`Failed prompt extraction for ${asset.filename}`, err);
       }

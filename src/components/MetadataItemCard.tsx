@@ -605,7 +605,9 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                   >
                     {asset.description ||
                       (asset.status === 'error'
-                        ? 'AI rate limit delay occurred. Click Redo button to regenerate immediately.'
+                        ? (asset.error && /429|quota|rate|resource_exhausted/i.test(asset.error)
+                            ? 'AI rate limit delay occurred. Click Retry to regenerate.'
+                            : 'Generation did not complete. Check the error above and click Retry.')
                         : 'None')}
                   </p>
                   {asset.status === 'error' && (
