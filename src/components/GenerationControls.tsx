@@ -245,9 +245,9 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
         </div>
         <input
           type="range"
-          min="5"
+          min="1"
           max="60"
-          step="5"
+          step="1"
           disabled={!settings.rpmEnabled}
           value={settings.rpmLimit}
           onChange={(e) => onUpdateSettings({ rpmLimit: Number(e.target.value) })}

@@ -657,6 +657,20 @@ function extractJson(text: string): any {
   return null;
 }
 
+const clientKeyCooldownUntil = new Map<string, number>();
+
+function prioritizeHealthyClientKeys(keys: string[]): string[] {
+  const now = Date.now();
+  const healthy: string[] = [];
+  const cooled: string[] = [];
+  for (const k of keys) {
+    const until = clientKeyCooldownUntil.get(k) || 0;
+    if (until > now) cooled.push(k);
+    else healthy.push(k);
+  }
+  return [...healthy, ...cooled];
+}
+
 // Client-side Direct Gemini API Call (Fallback when backend is unavailable on static hosts)
 async function generateViaDirectGemini(
   apiKey: string,
@@ -678,6 +692,7 @@ async function generateViaDirectGemini(
     advanceVector?: boolean;
     advanceIllustration?: boolean;
     includeConceptualKeywords?: boolean;
+    hasMoreHealthyKeys?: boolean;
   }
 ) {
   const chosenModel = model && model.trim() ? model.trim() : 'gemini-4-hydrogen';
@@ -817,12 +832,18 @@ Output ONLY valid JSON matching this schema:
           errorMsg.toLowerCase().includes('rate') ||
           errorMsg.toLowerCase().includes('resource_exhausted')
         ) {
-          console.warn(`Model ${currentModel} rate limit/quota reached (${errorMsg}), waiting 3.5s and switching to fallback candidate...`);
-          await new Promise((r) => setTimeout(r, 3500));
+          clientKeyCooldownUntil.set(apiKey.trim(), Date.now() + 45_000);
+          if (params.hasMoreHealthyKeys && currentModel === chosenModel) {
+            // Switch immediately to next healthy key without stalling on fallback models
+            throw lastError;
+          }
+          console.warn(`Model ${currentModel} rate limit/quota reached (${errorMsg}), waiting 1.5s and switching to fallback candidate...`);
+          await new Promise((r) => setTimeout(r, 1500));
           continue;
         }
 
-        if (response.status === 400 && errorMsg.toLowerCase().includes('api_key')) {
+        if (response.status === 401 || response.status === 403 || (response.status === 400 && errorMsg.toLowerCase().includes('api_key'))) {
+          clientKeyCooldownUntil.set(apiKey.trim(), Date.now() + 600_000);
           throw lastError;
         }
 
@@ -1168,10 +1189,11 @@ export async function generateMetadataForAsset(
     throw new Error('API Key Required: Please add your Google Gemini or Groq API Key.');
   }
 
-  const orderedCandidateKeys = [
+  const rotatedKeys = [
     ...candidateKeys.slice(keyPoolIndex % candidateKeys.length),
     ...candidateKeys.slice(0, keyPoolIndex % candidateKeys.length),
   ];
+  const orderedCandidateKeys = prioritizeHealthyClientKeys(rotatedKeys);
 
   // 1. Try Backend API first
   let shouldFallbackToDirectClient = false;
@@ -1265,6 +1287,7 @@ export async function generateMetadataForAsset(
   let lastDirectError: any = null;
   for (let i = 0; i < orderedCandidateKeys.length; i++) {
     const currentKey = orderedCandidateKeys[i];
+    const hasMoreKeys = i < orderedCandidateKeys.length - 1;
     try {
       if (settings.aiProvider === 'Groq Cloud' || currentKey.startsWith('gsk_')) {
         return await generateViaDirectGroq(currentKey, settings.model || '', {
@@ -1302,13 +1325,18 @@ export async function generateMetadataForAsset(
           advanceVector: asset.advanceVector ?? settings.advanceVector,
           advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
           includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
+          hasMoreHealthyKeys: hasMoreKeys,
         });
       }
     } catch (clientDirectErr: any) {
       lastDirectError = clientDirectErr;
-      if (i < orderedCandidateKeys.length - 1) {
-        await new Promise((r) => setTimeout(r, 3500));
+      const errMsg = String(clientDirectErr?.message || '').toLowerCase();
+      if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('rate') || errMsg.includes('resource_exhausted')) {
+        clientKeyCooldownUntil.set(currentKey, Date.now() + 45_000);
+      } else if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('api_key')) {
+        clientKeyCooldownUntil.set(currentKey, Date.now() + 600_000);
       }
+      // Switch to next key immediately without blocking delay
     }
   }
 

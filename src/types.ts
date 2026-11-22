@@ -90,6 +90,8 @@ export interface GenerationSettings {
   titleCaseStyle: 'default' | 'titleCase' | 'sentenceCase' | 'upperCase' | 'lowerCase';
   fileExtension: string;
   themeColor: string;
+  uiTheme?: 'dark' | 'light';
+  textColor?: string;
   negativeKeywords: string[];
   activeTab: 'metadata' | 'prompt';
 

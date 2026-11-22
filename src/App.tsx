@@ -108,6 +108,8 @@ export default function App() {
       titleCaseStyle: 'sentenceCase',
       fileExtension: 'Default',
       themeColor: '#ff5533',
+      uiTheme: 'dark',
+      textColor: '',
       strictStockCompliance: true,
       adobeTop10Priority: true,
       includeConceptualKeywords: true,
@@ -210,6 +212,23 @@ export default function App() {
       console.warn('Failed to auto-save settings to localStorage', e);
     }
   }, [settings]);
+
+  // Apply Light/Dark UI Theme, Accent Color, and Custom Text Color globally
+  useEffect(() => {
+    const mode = settings.uiTheme === 'light' ? 'light' : 'dark';
+    const root = document.documentElement;
+    root.setAttribute('data-theme', mode);
+    root.style.setProperty('--app-accent', settings.themeColor || '#ff5533');
+
+    const hasCustomText = Boolean(settings.textColor && settings.textColor.trim().length > 0);
+    if (hasCustomText && settings.textColor) {
+      root.setAttribute('data-custom-text', 'true');
+      root.style.setProperty('--app-text-color', settings.textColor);
+    } else {
+      root.removeAttribute('data-custom-text');
+      root.style.setProperty('--app-text-color', mode === 'light' ? '#0f172a' : '#f8fafc');
+    }
+  }, [settings.uiTheme, settings.textColor, settings.themeColor]);
 
   // Clean any legacy trademarks from existing in-memory assets
   useEffect(() => {
@@ -1050,13 +1069,31 @@ export default function App() {
 
   const completedCount = assets.filter((a) => a.status === 'completed').length;
 
+  const isLightTheme = settings.uiTheme === 'light';
+
   return (
-    <div className="min-h-screen bg-[#0b0d12] text-slate-100 flex flex-col font-sans selection:bg-[#ff5533] selection:text-white relative overflow-x-hidden">
-      {/* Subtle Warm Ambient Backdrop Illumination */}
+    <div
+      className={`min-h-screen flex flex-col font-sans selection:bg-[#ff5533] selection:text-white relative overflow-x-hidden transition-colors duration-200 ${
+        isLightTheme ? 'bg-slate-100 text-slate-900' : 'bg-[#0b0d12] text-slate-100'
+      }`}
+    >
+      {/* Subtle Ambient Backdrop Illumination */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[500px] bg-gradient-to-b from-[#ff5533]/8 via-orange-600/4 to-transparent blur-3xl opacity-60" />
-        <div className="absolute top-1/4 -left-64 w-[480px] h-[480px] bg-[#ff5533]/4 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/3 -right-64 w-[500px] h-[500px] bg-amber-500/4 rounded-full blur-[120px]" />
+        <div
+          className={`absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[500px] bg-gradient-to-b from-[#ff5533]/8 via-orange-600/4 to-transparent blur-3xl ${
+            isLightTheme ? 'opacity-25' : 'opacity-60'
+          }`}
+        />
+        <div
+          className={`absolute top-1/4 -left-64 w-[480px] h-[480px] bg-[#ff5533]/4 rounded-full blur-[120px] ${
+            isLightTheme ? 'opacity-25' : 'opacity-100'
+          }`}
+        />
+        <div
+          className={`absolute bottom-1/3 -right-64 w-[500px] h-[500px] bg-amber-500/4 rounded-full blur-[120px] ${
+            isLightTheme ? 'opacity-25' : 'opacity-100'
+          }`}
+        />
       </div>
 
       {/* Top Header */}
@@ -1068,6 +1105,26 @@ export default function App() {
         totalAssetsCount={assets.length}
         completedCount={completedCount}
         themeColor={settings.themeColor}
+        uiTheme={settings.uiTheme || 'dark'}
+        textColor={settings.textColor || ''}
+        onToggleUiTheme={() =>
+          setSettings((prev) => ({
+            ...prev,
+            uiTheme: prev.uiTheme === 'light' ? 'dark' : 'light',
+          }))
+        }
+        onChangeTextColor={(color) =>
+          setSettings((prev) => ({
+            ...prev,
+            textColor: color,
+          }))
+        }
+        onChangeThemeColor={(color) =>
+          setSettings((prev) => ({
+            ...prev,
+            themeColor: color,
+          }))
+        }
       />
 
       {/* Main Content Area: SEO Metadata Engine */}

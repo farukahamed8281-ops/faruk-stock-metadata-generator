@@ -52,6 +52,21 @@ app.use(express.json({ limit: '120mb' }));
 
 const port = 3000;
 
+// In-memory short cooldown map so rate-limited/exhausted API keys are immediately skipped for healthy keys
+const serverKeyCooldownUntil = new Map<string, number>();
+
+function prioritizeHealthyServerKeys(keys: string[]): string[] {
+  const now = Date.now();
+  const healthy: string[] = [];
+  const cooled: string[] = [];
+  for (const k of keys) {
+    const until = serverKeyCooldownUntil.get(k) || 0;
+    if (until > now) cooled.push(k);
+    else healthy.push(k);
+  }
+  return [...healthy, ...cooled];
+}
+
 let isEnvKeyValid = false;
 
 // Quietly check if host environment GEMINI_API_KEY is functional
@@ -905,9 +920,12 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
     let lastApiErrorMessage = 'AI metadata generation failed.';
     let lastHttpStatus = 502;
 
-    // Iterate through this user's own key candidates (Per-Session Rotation)
-    for (let keyIdx = 0; keyIdx < keyCandidates.length; keyIdx++) {
-      const clientKey = keyCandidates[keyIdx];
+    const orderedServerKeys = prioritizeHealthyServerKeys(keyCandidates);
+    const hasMultipleKeys = orderedServerKeys.length > 1;
+
+    // Iterate through this user's own key candidates (Per-Session Rotation, healthy keys first)
+    for (let keyIdx = 0; keyIdx < orderedServerKeys.length; keyIdx++) {
+      const clientKey = orderedServerKeys[keyIdx];
       const useGroq = aiProvider === 'Groq Cloud' || clientKey.startsWith('gsk_');
 
       const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
@@ -991,9 +1009,15 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
           if (!groqResp.ok) {
             lastHttpStatus = groqResp.status;
             lastApiErrorMessage = groqData?.error?.message || `Groq API HTTP ${groqResp.status}`;
-            if (groqResp.status === 401 || groqResp.status === 403) continue;
-            if (groqResp.status === 429 && keyIdx < keyCandidates.length - 1) {
-              await new Promise((r) => setTimeout(r, 2500));
+            if (groqResp.status === 401 || groqResp.status === 403) {
+              serverKeyCooldownUntil.set(clientKey, Date.now() + 600_000);
+              continue;
+            }
+            if (groqResp.status === 429) {
+              serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
+              if (keyIdx < orderedServerKeys.length - 1) {
+                continue; // Immediately switch to next healthy Groq key
+              }
             }
             continue;
           }
@@ -1132,6 +1156,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             if (isAuthError) {
               isKeyAuthFailure = true;
               lastHttpStatus = 401;
+              serverKeyCooldownUntil.set(clientKey, Date.now() + 600_000);
               console.info(`[Auth] User key #${keyIdx + 1} failed authentication. Skipping to next candidate.`);
               break;
             }
@@ -1144,8 +1169,14 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
 
             if (isRateLimit) {
               lastHttpStatus = 429;
-              console.info(`[Quota] Rate limit on ${targetModel}. Waiting 2.5s before fallback...`);
-              await new Promise((r) => setTimeout(r, 2500));
+              serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
+              // If user has more API keys available and primary model hit quota, switch key IMMEDIATELY with zero delay
+              if (hasMultipleKeys && keyIdx < orderedServerKeys.length - 1 && targetModel === modelsToTry[0]) {
+                console.info(`[Quota] Key #${keyIdx + 1} hit limit on ${targetModel}. Switching immediately to next API key...`);
+                break;
+              }
+              console.info(`[Quota] Rate limit on ${targetModel}. Waiting 1.5s before fallback model...`);
+              await new Promise((r) => setTimeout(r, 1500));
             }
           }
 
@@ -1188,10 +1219,6 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
         } catch (outerErr: any) {
           lastApiErrorMessage = outerErr?.message || lastApiErrorMessage;
         }
-      }
-
-      if (!isKeyAuthFailure && keyIdx < keyCandidates.length - 1) {
-        await new Promise((r) => setTimeout(r, 1200));
       }
     }
 
