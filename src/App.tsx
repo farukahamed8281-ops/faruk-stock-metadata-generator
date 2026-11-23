@@ -163,7 +163,7 @@ export default function App() {
         ) {
           currentModel = 'gemini-4-hydrogen';
         }
-        if (currentModel === 'llama-3.2-11b-vision-preview') {
+        if (currentModel === 'llama-3.2-11b-vision-preview' || currentModel.includes('llama-3.3-70b')) {
           currentModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
         }
         if (parsed.defaultTopic === 'Architectural Blueprint') {
@@ -204,6 +204,8 @@ export default function App() {
           keywordsCount: keywordsCountVal,
           themeColor: theme,
           model: currentModel,
+          includeConceptualKeywords: true,
+          deepVideoProxy: true,
           apiKeys: mergedKeys,
           customApiKey: mergedKeys[0] || parsed.customApiKey || defaultSettings.customApiKey,
         };
@@ -377,7 +379,9 @@ export default function App() {
       .replace(/\s*isolated on black ba\b/gi, '')
       .replace(/\s*isolated on\s*$/gi, '')
       .replace(/\s*isolated\s*$/gi, '')
-      .replace(/\.[^/.]+$/, '')
+      .replace(/\.[^/.]+$/, (ext) =>
+        /\.(jpe?g|png|webp|svg|mp4|mov|avi|webm|mkv|m4v|eps|ai|pdf)$/i.test(ext) ? '' : ext
+      )
       .trim();
 
     if (isVector) {

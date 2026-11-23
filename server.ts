@@ -341,6 +341,7 @@ app.post('/api/generate-image-prompt', async (req: Request, res: Response) => {
       customInstructions = '',
       apiKey,
       apiKeys = [],
+      model,
     } = req.body;
 
     const userKey = apiKey || (req.headers['x-gemini-api-key'] as string);
@@ -362,20 +363,19 @@ app.post('/api/generate-image-prompt', async (req: Request, res: Response) => {
     const geminiPromptKeys = prioritizeHealthyServerKeys(
       keyCandidates.filter((k) => !k.startsWith('gsk_'))
     );
-    const promptModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+    const requestedPromptModel =
+      model && typeof model === 'string' && model.trim().startsWith('gemini-') ? model.trim() : '';
+    const promptModels = [
+      ...(requestedPromptModel ? [requestedPromptModel] : []),
+      'gemini-4-hydrogen',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
-    for (const clientKey of geminiPromptKeys) {
-      if (imageData && imageData.startsWith('data:')) {
-        const promptGenClient = new GoogleGenAI({
-          apiKey: clientKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        });
+    const authFailedPromptKeys = new Set<string>();
 
-        const promptText = `
+    if (imageData && imageData.startsWith('data:') && geminiPromptKeys.length > 0) {
+      const promptText = `
 You are a world-class AI Image Prompt Engineer specializing in Reverse Prompt Generation (Image-to-Prompt) for Google Gemini AI (Imagen 3), Flow AI / Recraft, Midjourney v6, Flux.1, and DALL-E 3.
 
 Analyze the uploaded visual image in detail and create rich, precise, high-fidelity generative AI prompts that would allow an AI image generator to reproduce this exact image style, subject, composition, and mood.
@@ -401,18 +401,31 @@ REQUIRED REVERSE PROMPT ANALYSIS:
    - "negativePrompt": Crucial negative tags to prevent flaws, unwanted text, or distortion.
 `;
 
-        const contents: any[] = [];
-        const [header, base64] = imageData.split(';base64,');
-        const mimeType = header.replace('data:', '');
-        contents.push({
-          inlineData: {
-            mimeType: mimeType || 'image/jpeg',
-            data: base64,
-          },
-        });
-        contents.push({ text: promptText });
+      const contents: any[] = [];
+      const [header, base64] = imageData.split(';base64,');
+      const mimeType = header.replace('data:', '');
+      contents.push({
+        inlineData: {
+          mimeType: mimeType || 'image/jpeg',
+          data: base64,
+        },
+      });
+      contents.push({ text: promptText });
 
-        for (const pModel of promptModels) {
+      // First Priority: try user's selected model across ALL healthy keys before falling back
+      for (const pModel of promptModels) {
+        let modelUnsupported = false;
+        for (const clientKey of geminiPromptKeys) {
+          if (authFailedPromptKeys.has(clientKey)) continue;
+          const promptGenClient = new GoogleGenAI({
+            apiKey: clientKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          });
+
           try {
             const response: any = await Promise.race([
               promptGenClient.models.generateContent({
@@ -420,7 +433,7 @@ REQUIRED REVERSE PROMPT ANALYSIS:
                 contents: contents,
                 config: {
                   ...(pModel.startsWith('gemini-4')
-                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                    ? { thinkingConfig: { thinkingLevel: pModel === 'gemini-4-neon' ? ThinkingLevel.HIGH : ThinkingLevel.LOW } }
                     : pModel === 'gemini-3.1-flash-lite'
                     ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
                     : { thinkingConfig: { thinkingBudget: 0 } }),
@@ -465,12 +478,19 @@ REQUIRED REVERSE PROMPT ANALYSIS:
             }
           } catch (callErr: any) {
             const errStr = (callErr?.message || '').toLowerCase();
-            if (errStr.includes('401') || errStr.includes('unauthenticated') || errStr.includes('access_token_type_unsupported') || errStr.includes('429') || errStr.includes('quota')) {
-              console.info(`[Prompt] Key skipped/cooldown (${pModel}).`);
+            if (errStr.includes('404') || errStr.includes('not found')) {
+              modelUnsupported = true;
               break;
+            }
+            if (errStr.includes('401') || errStr.includes('unauthenticated') || errStr.includes('access_token_type_unsupported') || errStr.includes('api_key_invalid')) {
+              authFailedPromptKeys.add(clientKey);
+              serverKeyCooldownUntil.set(clientKey, Date.now() + 600_000);
+            } else if (errStr.includes('429') || errStr.includes('quota')) {
+              serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
             }
           }
         }
+        if (modelUnsupported) continue;
       }
     }
 
@@ -959,28 +979,24 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
 
     const orderedServerKeys = prioritizeHealthyServerKeys(providerKeys);
     const hasMultipleKeys = orderedServerKeys.length > 1;
+    const authFailedKeys = new Set<string>();
 
-    // Iterate through this user's own key candidates (Per-Session Rotation, healthy keys first)
-    for (let keyIdx = 0; keyIdx < orderedServerKeys.length; keyIdx++) {
-      const clientKey = orderedServerKeys[keyIdx];
-      const useGroq = wantsGroq;
+    const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
+    const hasVisualData = Boolean(imageData && typeof imageData === 'string' && imageData.includes('base64') && !imageData.startsWith('data:image/svg+xml'));
+    const effectiveVideoData = !wantsGroq ? (videoData || serverProxyVideoDataUrl) : '';
+    const hasDirectVideo = Boolean(effectiveVideoData && typeof effectiveVideoData === 'string' && effectiveVideoData.includes('base64') && effectiveVideoData.startsWith('data:video/'));
 
-      const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
-      const hasVisualData = Boolean(imageData && typeof imageData === 'string' && imageData.includes('base64') && !imageData.startsWith('data:image/svg+xml'));
-      const effectiveVideoData = !useGroq ? (videoData || serverProxyVideoDataUrl) : '';
-      const hasDirectVideo = Boolean(effectiveVideoData && typeof effectiveVideoData === 'string' && effectiveVideoData.includes('base64') && effectiveVideoData.startsWith('data:video/'));
+    const typedMediaContext = mediaContext as MediaInspectionMeta | undefined;
+    const effectiveVideoMeta: MediaInspectionMeta | undefined = typedMediaContext
+      ? { ...typedMediaContext, hasDirectVideo }
+      : undefined;
+    const videoDirective = getVideoSeoDirective(effectiveVideoMeta, fileType);
+    const imageFramingNote =
+      fileType !== 'video' && typedMediaContext?.width && typedMediaContext?.height
+        ? `- Technical Framing: ${typedMediaContext.width}x${typedMediaContext.height}px (${typedMediaContext.orientation || 'horizontal'}).\n`
+        : '';
 
-      const typedMediaContext = mediaContext as MediaInspectionMeta | undefined;
-      const effectiveVideoMeta: MediaInspectionMeta | undefined = typedMediaContext
-        ? { ...typedMediaContext, hasDirectVideo }
-        : undefined;
-      const videoDirective = getVideoSeoDirective(effectiveVideoMeta, fileType);
-      const imageFramingNote =
-        fileType !== 'video' && typedMediaContext?.width && typedMediaContext?.height
-          ? `- Technical Framing: ${typedMediaContext.width}x${typedMediaContext.height}px (${typedMediaContext.orientation || 'horizontal'}).\n`
-          : '';
-
-      const promptText = `
+    const promptText = `
 ${profile.systemPrompt}
 
 TASK (95-99% PIXEL-PRECISION VISUAL ACCURACY MANDATE):
@@ -1002,199 +1018,211 @@ ${advanceIsolatedTransparent ? `- ADVANCE TITLE REQUIREMENT: The asset is on a T
 ${advanceIsolatedWhite ? `- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include ${marketplace === 'Adobe Stock' ? '"white", "background", "isolated", "studio"' : '"white background", "isolated", "studio shot"'}.` : ''}
 ${advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
-${includeConceptualKeywords ? `
 - CONCEPTUAL KEYWORDS (3-5 SCENE-ACCURATE ABSTRACT TAGS):
 Analyze the true commercial purpose and mood of THIS exact image (e.g., efficiency, precision, security, telemetry, diagnostics, autonomy, reliability, connectivity, protection, sustainability). Avoid lazily repeating cliché filler like "innovation" or "future" unless directly fitting.
-Include those 3-5 conceptual single-word terms inside the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
+Include those 3-5 conceptual single-word terms inside the main "keywords" array AND list them separately in "conceptualKeywords".
 - Description: ${descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : marketplace === 'Shutterstock' ? `Rich, complete, searchable Shutterstock title-sentence strictly within ${Math.max(120, descLength)} characters (max 200 chars).` : `Concise, natural commercial description sentence under ${descLength} characters (never mid-word).`}
 - Category & Topic: Pick ONE exact official ${marketplace} category (e.g., Transport for vehicles/EV cabins/road barriers/highways; Industry for factory robots/recycling/warehouses; Science for surgical/labs/medicine/space stations; People for human hands/portraits; Technology for servers/chips/cameras/biometrics) plus a clean 2-3 word Subject/Topic.
 
 ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${customPrompt.trim()}` : ''}
 `;
 
-      // --- BRANCH A: GROQ CLOUD ---
-      if (useGroq) {
-        const groqModel =
-          model && !model.startsWith('gemini-')
-            ? model.trim()
-            : 'meta-llama/llama-4-scout-17b-16e-instruct';
-        try {
-          const userContent: any[] = [];
-          if (hasVisualData) {
-            userContent.push({
-              type: 'image_url',
-              image_url: { url: imageData },
-            });
-          }
+    // --- BRANCH A: GROQ CLOUD (Selected Model FIRST across all healthy Groq keys) ---
+    if (wantsGroq) {
+      const requestedGroqModel =
+        requestedModel && !requestedModel.startsWith('gemini-') && !requestedModel.includes('llama-3.3-70b')
+          ? requestedModel
+          : 'meta-llama/llama-4-scout-17b-16e-instruct';
+      const groqModelsToTry = [
+        requestedGroqModel,
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+      ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+
+      for (const targetGroqModel of groqModelsToTry) {
+        const userContent: any[] = [];
+        if (hasVisualData) {
           userContent.push({
-            type: 'text',
-            text: `${promptText}\nOutput ONLY valid JSON matching: {"visualAudit":"...","title":"...","topic":"...","description":"...","keywords":["..."],"conceptualKeywords":["..."],"category":"..."}`,
+            type: 'image_url',
+            image_url: { url: imageData },
           });
+        }
+        userContent.push({
+          type: 'text',
+          text: `${promptText}\nOutput ONLY valid JSON matching: {"visualAudit":"...","title":"...","topic":"...","description":"...","keywords":["..."],"conceptualKeywords":["..."],"category":"..."}`,
+        });
 
-          const groqController = new AbortController();
-          const groqTid = setTimeout(() => groqController.abort(), 25000);
-          const groqResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${clientKey}`,
-              'Content-Type': 'application/json',
-            },
-            signal: groqController.signal,
-            body: JSON.stringify({
-              model: groqModel,
-              messages: [{ role: 'user', content: userContent }],
-              temperature: 0.2,
-              max_tokens: 1024,
-              response_format: { type: 'json_object' },
-            }),
-          });
-          clearTimeout(groqTid);
+        for (let keyIdx = 0; keyIdx < orderedServerKeys.length; keyIdx++) {
+          const clientKey = orderedServerKeys[keyIdx];
+          if (authFailedKeys.has(clientKey)) continue;
 
-          const groqData: any = await groqResp.json().catch(() => ({}));
-          if (!groqResp.ok) {
-            lastHttpStatus = groqResp.status;
-            lastApiErrorMessage = groqData?.error?.message || `Groq API HTTP ${groqResp.status}`;
-            if (groqResp.status === 401 || groqResp.status === 403) {
-              serverKeyCooldownUntil.set(clientKey, Date.now() + 600_000);
+          try {
+            const groqController = new AbortController();
+            const groqTid = setTimeout(() => groqController.abort(), 25000);
+            const groqResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${clientKey}`,
+                'Content-Type': 'application/json',
+              },
+              signal: groqController.signal,
+              body: JSON.stringify({
+                model: targetGroqModel,
+                messages: [{ role: 'user', content: userContent }],
+                temperature: 0.2,
+                max_tokens: 1024,
+                response_format: { type: 'json_object' },
+              }),
+            });
+            clearTimeout(groqTid);
+
+            const groqData: any = await groqResp.json().catch(() => ({}));
+            if (!groqResp.ok) {
+              lastHttpStatus = groqResp.status;
+              lastApiErrorMessage = groqData?.error?.message || `Groq API HTTP ${groqResp.status}`;
+              if (groqResp.status === 401 || groqResp.status === 403) {
+                authFailedKeys.add(clientKey);
+                serverKeyCooldownUntil.set(clientKey, Date.now() + 600_000);
+                continue;
+              }
+              if (groqResp.status === 429) {
+                serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
+                continue;
+              }
+              if (groqResp.status === 404) {
+                break; // Model unavailable, try next model
+              }
               continue;
             }
-            if (groqResp.status === 429) {
-              serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
-              if (keyIdx < orderedServerKeys.length - 1) {
-                continue; // Immediately switch to next healthy Groq key
+
+            const rawText = groqData?.choices?.[0]?.message?.content || '';
+            const parsed = parseAiJsonResponse(rawText);
+            if (parsed && (parsed.title || parsed.keywords)) {
+              let resTitle = sanitizeTitle((parsed.title || filename).trim());
+              if (titleLength > 0 && resTitle.length > titleLength) {
+                resTitle = truncateAtWordBoundary(resTitle.replace(/\.+$/, ''), titleLength - 1);
+                resTitle = sanitizeTitle(resTitle);
               }
+
+              let resDesc = '';
+              if (descLength > 0 && parsed.description) {
+                resDesc = truncateAtWordBoundary(sanitizeTitle(parsed.description.trim()), descLength);
+              }
+
+              const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+              const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any, fileType as any);
+              const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
+                ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
+                : [];
+
+              return res.json({
+                title: resTitle,
+                rawTitle: parsed.title || resTitle,
+                topic: parsed.topic || parsed.category || category,
+                description: resDesc,
+                rawDescription: parsed.description || '',
+                keywords: resKeywords,
+                rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
+                conceptualKeywords,
+                category: normalizeCategoryForMarketplace(parsed.category || category, marketplace as any),
+                source: `Groq Cloud (${targetGroqModel})`,
+              });
             }
-            continue;
+          } catch (groqErr: any) {
+            lastApiErrorMessage = groqErr?.message || 'Groq Cloud request failed.';
           }
-
-          const rawText = groqData?.choices?.[0]?.message?.content || '';
-          const parsed = parseAiJsonResponse(rawText);
-          if (parsed && (parsed.title || parsed.keywords)) {
-            let resTitle = sanitizeTitle((parsed.title || filename).trim());
-            if (titleLength > 0 && resTitle.length > titleLength) {
-              resTitle = truncateAtWordBoundary(resTitle.replace(/\.+$/, ''), titleLength - 1);
-              resTitle = sanitizeTitle(resTitle);
-            }
-
-            let resDesc = '';
-            if (descLength > 0 && parsed.description) {
-              resDesc = truncateAtWordBoundary(sanitizeTitle(parsed.description.trim()), descLength);
-            }
-
-            const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-            const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any, fileType as any);
-            const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
-              ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
-              : [];
-
-            return res.json({
-              title: resTitle,
-              rawTitle: parsed.title || resTitle,
-              topic: parsed.topic || parsed.category || category,
-              description: resDesc,
-              rawDescription: parsed.description || '',
-              keywords: resKeywords,
-              rawKeywords: Array.isArray(parsed.keywords) ? parsed.keywords : resKeywords,
-              conceptualKeywords,
-              category: normalizeCategoryForMarketplace(parsed.category || category, marketplace as any),
-              source: `Groq Cloud (${groqModel})`,
-            });
-          }
-        } catch (groqErr: any) {
-          lastApiErrorMessage = groqErr?.message || 'Groq Cloud request failed.';
         }
-        continue;
       }
-
-      // --- BRANCH B: GOOGLE GEMINI ---
-      const genAiClient = new GoogleGenAI({
-        apiKey: clientKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
+    } else {
+      // --- BRANCH B: GOOGLE GEMINI (First Priority: user-selected model tried across ALL healthy keys first) ---
+      const promptParts: any[] = [];
+      if (hasDirectVideo && effectiveVideoData) {
+        const parts = effectiveVideoData.split(',');
+        const base64 = parts.length > 1 ? parts[1] : parts[0];
+        const mimeMatch = effectiveVideoData.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'video/mp4';
+        promptParts.push({
+          inlineData: {
+            mimeType,
+            data: base64,
           },
-        },
-      });
-
-      let isKeyAuthFailure = false;
+        });
+      } else if (hasVisualData) {
+        const parts = imageData.split(',');
+        const base64 = parts.length > 1 ? parts[1] : parts[0];
+        const mimeMatch = imageData.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        promptParts.push({
+          inlineData: {
+            mimeType,
+            data: base64,
+          },
+        });
+      }
+      promptParts.push({ text: promptText });
 
       for (const targetModel of modelsToTry) {
-        if (isKeyAuthFailure) break;
-        try {
-          const promptParts: any[] = [];
-          if (hasDirectVideo && effectiveVideoData) {
-            const parts = effectiveVideoData.split(',');
-            const base64 = parts.length > 1 ? parts[1] : parts[0];
-            const mimeMatch = effectiveVideoData.match(/data:([^;]+);/);
-            const mimeType = mimeMatch ? mimeMatch[1] : 'video/mp4';
-            promptParts.push({
-              inlineData: {
-                mimeType,
-                data: base64,
+        const config: any = {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              visualAudit: {
+                type: Type.STRING,
+                description:
+                  'Brief 15-25 word pixel check: main subject/materials, readable labels, UI icons, setting/lighting.',
               },
-            });
-          } else if (hasVisualData) {
-            const parts = imageData.split(',');
-            const base64 = parts.length > 1 ? parts[1] : parts[0];
-            const mimeMatch = imageData.match(/data:([^;]+);/);
-            const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-            promptParts.push({
-              inlineData: {
-                mimeType,
-                data: base64,
+              title: { type: Type.STRING, description: 'Accurate stock title' },
+              topic: { type: Type.STRING, description: 'Core subject matter (2-4 words)' },
+              description: { type: Type.STRING, description: 'Accurate commercial description sentence' },
+              keywords: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'Exact ranked commercial keywords ordered by descending relevance',
               },
-            });
-          }
-          promptParts.push({ text: promptText });
-
-          const isGemini4 = targetModel.startsWith('gemini-4');
-          const config: any = {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                visualAudit: {
-                  type: Type.STRING,
-                  description:
-                    'Brief 15-25 word pixel check: main subject/materials, readable labels, UI icons, setting/lighting.',
-                },
-                title: { type: Type.STRING, description: 'Accurate stock title' },
-                topic: { type: Type.STRING, description: 'Core subject matter (2-4 words)' },
-                description: { type: Type.STRING, description: 'Accurate commercial description sentence' },
-                keywords: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'Exact ranked commercial keywords ordered by descending relevance',
-                },
-                conceptualKeywords: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: '3-5 abstract, emotion, or commercial message keywords',
-                },
-                category: { type: Type.STRING, description: `Official ${marketplace} category name` },
+              conceptualKeywords: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '3-5 abstract, emotion, or commercial message keywords',
               },
-              required: ['visualAudit', 'title', 'topic', 'description', 'keywords', 'category'],
+              category: { type: Type.STRING, description: `Official ${marketplace} category name` },
             },
+            required: ['visualAudit', 'title', 'topic', 'description', 'keywords', 'category'],
+          },
+        };
+
+        if (hasDirectVideo) {
+          config.mediaResolution = MediaResolution.MEDIA_RESOLUTION_MEDIUM;
+        } else if (hasVisualData) {
+          config.mediaResolution = MediaResolution.MEDIA_RESOLUTION_HIGH;
+        }
+
+        if (targetModel.startsWith('gemini-4')) {
+          config.thinkingConfig = {
+            thinkingLevel: targetModel === 'gemini-4-neon' ? ThinkingLevel.HIGH : ThinkingLevel.LOW,
           };
+        } else if (targetModel === 'gemini-3.1-flash-lite') {
+          config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+        } else if (targetModel === 'gemini-2.5-flash') {
+          config.thinkingConfig = { thinkingBudget: 0 };
+          config.temperature = 0.15;
+        } else {
+          config.temperature = 0.15;
+        }
 
-          if (hasDirectVideo) {
-            config.mediaResolution = MediaResolution.MEDIA_RESOLUTION_MEDIUM;
-          } else if (hasVisualData) {
-            config.mediaResolution = MediaResolution.MEDIA_RESOLUTION_HIGH;
-          }
+        let modelNotFound = false;
 
-          if (targetModel.startsWith('gemini-4')) {
-            config.thinkingConfig = {
-              thinkingLevel: targetModel === 'gemini-4-neon' ? ThinkingLevel.HIGH : ThinkingLevel.LOW,
-            };
-          } else if (targetModel === 'gemini-3.1-flash-lite') {
-            config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
-          } else if (targetModel === 'gemini-2.5-flash') {
-            config.thinkingConfig = { thinkingBudget: 0 };
-            config.temperature = 0.15;
-          } else {
-            config.temperature = 0.15;
-          }
+        for (let keyIdx = 0; keyIdx < orderedServerKeys.length; keyIdx++) {
+          const clientKey = orderedServerKeys[keyIdx];
+          if (authFailedKeys.has(clientKey)) continue;
+
+          const genAiClient = new GoogleGenAI({
+            apiKey: clientKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          });
 
           let response: any = null;
           try {
@@ -1214,10 +1242,10 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             const errStr = errMsg.toLowerCase();
             lastApiErrorMessage = errMsg;
 
-            const isNotFound = errStr.includes('404') || errStr.includes('not found');
-            if (isNotFound) {
+            if (errStr.includes('404') || errStr.includes('not found')) {
               serverUnsupportedModelUntil.set(targetModel, Date.now() + 600_000);
-              continue;
+              modelNotFound = true;
+              break;
             }
 
             const isAuthError =
@@ -1229,17 +1257,18 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               errStr.includes('invalid authentication credentials');
 
             if (isAuthError) {
-              isKeyAuthFailure = true;
+              authFailedKeys.add(clientKey);
               lastHttpStatus = 401;
               serverKeyCooldownUntil.set(clientKey, Date.now() + 600_000);
-              console.info(`[Auth] User key #${keyIdx + 1} failed authentication. Skipping to next candidate.`);
-              break;
+              console.info(`[Auth] User key #${keyIdx + 1} failed authentication. Trying next healthy key on ${targetModel}...`);
+              continue;
             }
 
-            const isTimeout = errStr.includes('timeout');
-            if (isTimeout && hasMultipleKeys && keyIdx < orderedServerKeys.length - 1 && targetModel === modelsToTry[0]) {
-              console.info(`[Timeout] Key #${keyIdx + 1} timed out on ${targetModel}. Switching immediately to next API key...`);
-              break;
+            if (errStr.includes('timeout')) {
+              if (hasMultipleKeys && keyIdx < orderedServerKeys.length - 1) {
+                console.info(`[Timeout] Key #${keyIdx + 1} timed out on ${targetModel}. Trying next API key...`);
+              }
+              continue;
             }
 
             const isRateLimit =
@@ -1251,12 +1280,12 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             if (isRateLimit) {
               lastHttpStatus = 429;
               serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
-              // Switch immediately to next healthy key on this primary working model without stalling
-              if (hasMultipleKeys && keyIdx < orderedServerKeys.length - 1 && targetModel === modelsToTry[0]) {
-                console.info(`[Quota] Key #${keyIdx + 1} hit limit on ${targetModel}. Switching immediately to next API key...`);
-                break;
+              if (hasMultipleKeys && keyIdx < orderedServerKeys.length - 1) {
+                console.info(`[Quota] Key #${keyIdx + 1} hit limit on ${targetModel}. Trying next API key...`);
+              } else {
+                await new Promise((r) => setTimeout(r, 250));
               }
-              await new Promise((r) => setTimeout(r, 250));
+              continue;
             }
           }
 
@@ -1296,9 +1325,9 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               });
             }
           }
-        } catch (outerErr: any) {
-          lastApiErrorMessage = outerErr?.message || lastApiErrorMessage;
         }
+
+        if (modelNotFound) continue;
       }
     }
 

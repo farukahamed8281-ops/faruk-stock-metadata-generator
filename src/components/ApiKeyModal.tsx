@@ -65,11 +65,10 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'Groq Cloud',
     badge: '100% FREE & ULTRA-FAST',
     portalName: 'Groq Console',
-    description: 'Ultra-high speed LPU inference with free tier for Llama 4 Scout Vision and Llama 3.3 microstock SEO',
+    description: 'Ultra-high speed LPU inference with free tier for Llama 4 Scout Vision microstock SEO',
     defaultModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
     models: [
       { id: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout 17B Vision (Free Fast Vision)', vision: true },
-      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (High Intelligence SEO)', vision: false },
     ],
     supportsVision: true,
     getKeyUrl: 'https://console.groq.com/keys',

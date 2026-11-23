@@ -758,9 +758,13 @@ async function generateViaDirectGemini(
     advanceIllustration?: boolean;
     includeConceptualKeywords?: boolean;
     hasMoreHealthyKeys?: boolean;
+    strictSingleModel?: boolean;
   }
 ) {
-  const modelCandidates = getFastClientModelCandidates(model);
+  const modelCandidates =
+    params.strictSingleModel && model && model.trim()
+      ? [model.trim()]
+      : getFastClientModelCandidates(model);
 
   const profile = getMarketplaceSeoProfile(
     params.marketplace,
@@ -1042,8 +1046,9 @@ async function generateViaDirectGroq(
       ? `- Technical Framing: ${params.mediaContext.width}x${params.mediaContext.height}px (${params.mediaContext.orientation || 'horizontal'}).\n`
       : '';
 
+  const supportsVision = !targetModel.includes('llama-3.3-70b');
   const userContent: any[] = [];
-  if (hasVisualData && params.imageData) {
+  if (hasVisualData && params.imageData && supportsVision) {
     userContent.push({
       type: 'image_url',
       image_url: { url: params.imageData },
@@ -1236,7 +1241,7 @@ export async function generateMetadataForAsset(
   const { imageData, videoData, videoProxyId, resolvedPreviewUrl, mediaContext } = await prepareMediaPayload(
     asset,
     preferDirectVideo,
-    settings.deepVideoProxy ?? true
+    true
   );
 
   // Only run offline heuristic generator if user explicitly enabled Offline Mode
@@ -1391,58 +1396,86 @@ export async function generateMetadataForAsset(
 
   // 2. Client-Side Direct API Fallback (only when backend endpoint is unavailable)
   let lastDirectError: any = null;
-  for (let i = 0; i < orderedCandidateKeys.length; i++) {
-    const currentKey = orderedCandidateKeys[i];
-    const hasMoreKeys = i < orderedCandidateKeys.length - 1;
-    try {
-      if (settings.aiProvider === 'Groq Cloud') {
-        return await generateViaDirectGroq(currentKey, settings.model || '', {
-          filename: asset.filename,
-          fileType: asset.fileType,
-          imageData,
-          mediaContext,
-          marketplace,
-          titleLength: settings.titleLength,
-          descLength: settings.descLength,
-          keywordsCount: settings.keywordsCount,
-          category: asset.category,
-          customPrompt: settings.customPrompt,
-          advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
-          advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
-          advanceVector: asset.advanceVector ?? settings.advanceVector,
-          advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
-          includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
-        });
-      } else {
-        return await generateViaDirectGemini(currentKey, settings.model, {
-          filename: asset.filename,
-          fileType: asset.fileType,
-          imageData,
-          videoData,
-          mediaContext,
-          marketplace,
-          titleLength: settings.titleLength,
-          descLength: settings.descLength,
-          keywordsCount: settings.keywordsCount,
-          category: asset.category,
-          customPrompt: settings.customPrompt,
-          advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
-          advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
-          advanceVector: asset.advanceVector ?? settings.advanceVector,
-          advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
-          includeConceptualKeywords: settings.includeConceptualKeywords ?? true,
-          hasMoreHealthyKeys: hasMoreKeys,
-        });
+  if (settings.aiProvider === 'Groq Cloud') {
+    const requestedGroq =
+      settings.model && !settings.model.startsWith('gemini-') && !settings.model.includes('llama-3.3-70b')
+        ? settings.model.trim()
+        : 'meta-llama/llama-4-scout-17b-16e-instruct';
+    const groqModelsToTry = [
+      requestedGroq,
+      'meta-llama/llama-4-scout-17b-16e-instruct',
+    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+
+    for (const targetGroqModel of groqModelsToTry) {
+      for (let i = 0; i < orderedCandidateKeys.length; i++) {
+        const currentKey = orderedCandidateKeys[i];
+        try {
+          return await generateViaDirectGroq(currentKey, targetGroqModel, {
+            filename: asset.filename,
+            fileType: asset.fileType,
+            imageData,
+            mediaContext,
+            marketplace,
+            titleLength: settings.titleLength,
+            descLength: settings.descLength,
+            keywordsCount: settings.keywordsCount,
+            category: asset.category,
+            customPrompt: settings.customPrompt,
+            advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
+            advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
+            advanceVector: asset.advanceVector ?? settings.advanceVector,
+            advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
+            includeConceptualKeywords: true,
+          });
+        } catch (clientDirectErr: any) {
+          lastDirectError = clientDirectErr;
+          const errMsg = String(clientDirectErr?.message || '').toLowerCase();
+          if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('rate') || errMsg.includes('resource_exhausted')) {
+            clientKeyCooldownUntil.set(currentKey, Date.now() + 45_000);
+          } else if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('api_key')) {
+            clientKeyCooldownUntil.set(currentKey, Date.now() + 600_000);
+          }
+        }
       }
-    } catch (clientDirectErr: any) {
-      lastDirectError = clientDirectErr;
-      const errMsg = String(clientDirectErr?.message || '').toLowerCase();
-      if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('rate') || errMsg.includes('resource_exhausted')) {
-        clientKeyCooldownUntil.set(currentKey, Date.now() + 45_000);
-      } else if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('api_key')) {
-        clientKeyCooldownUntil.set(currentKey, Date.now() + 600_000);
+    }
+  } else {
+    // First Priority: try user's selected Gemini model across ALL healthy keys before falling back
+    const directGeminiModels = getFastClientModelCandidates(settings.model);
+    for (const targetModel of directGeminiModels) {
+      for (let i = 0; i < orderedCandidateKeys.length; i++) {
+        const currentKey = orderedCandidateKeys[i];
+        const hasMoreKeys = i < orderedCandidateKeys.length - 1;
+        try {
+          return await generateViaDirectGemini(currentKey, targetModel, {
+            filename: asset.filename,
+            fileType: asset.fileType,
+            imageData,
+            videoData,
+            mediaContext,
+            marketplace,
+            titleLength: settings.titleLength,
+            descLength: settings.descLength,
+            keywordsCount: settings.keywordsCount,
+            category: asset.category,
+            customPrompt: settings.customPrompt,
+            advanceIsolatedTransparent: asset.advanceIsolatedTransparent ?? settings.advanceIsolatedTransparent,
+            advanceIsolatedWhite: asset.advanceIsolatedWhite ?? settings.advanceIsolatedWhite,
+            advanceVector: asset.advanceVector ?? settings.advanceVector,
+            advanceIllustration: asset.advanceIllustration ?? settings.advanceIllustration,
+            includeConceptualKeywords: true,
+            hasMoreHealthyKeys: hasMoreKeys,
+            strictSingleModel: true,
+          });
+        } catch (clientDirectErr: any) {
+          lastDirectError = clientDirectErr;
+          const errMsg = String(clientDirectErr?.message || '').toLowerCase();
+          if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('rate') || errMsg.includes('resource_exhausted')) {
+            clientKeyCooldownUntil.set(currentKey, Date.now() + 45_000);
+          } else if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('api_key')) {
+            clientKeyCooldownUntil.set(currentKey, Date.now() + 600_000);
+          }
+        }
       }
-      // Switch to next key immediately without blocking delay
     }
   }
 
@@ -1499,6 +1532,7 @@ export async function generateImagePromptForAsset(params: {
           customInstructions: params.customInstructions || '',
           apiKey: orderedKeys[0],
           apiKeys: orderedKeys,
+          model: params.model,
         }),
       });
       const contentType = res.headers.get('content-type') || '';
@@ -1536,8 +1570,8 @@ Output ONLY valid JSON with keys: "mainPrompt", "geminiPrompt", "flowPrompt", "m
       (m, idx, arr) => arr.indexOf(m) === idx
     );
 
-    for (const key of geminiKeys) {
-      for (const m of modelsToTry) {
+    for (const m of modelsToTry) {
+      for (const key of geminiKeys) {
         try {
           const resp = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${encodeURIComponent(key)}`,
@@ -1553,7 +1587,6 @@ Output ONLY valid JSON with keys: "mainPrompt", "geminiPrompt", "flowPrompt", "m
           if (!resp.ok) {
             if (resp.status === 429) {
               clientKeyCooldownUntil.set(key, Date.now() + 45_000);
-              break;
             }
             continue;
           }
