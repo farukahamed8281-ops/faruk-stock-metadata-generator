@@ -47,9 +47,10 @@ VIDEO FOOTAGE SEO DIRECTIVES (CRITICAL FOR VIDEO STOCK):
 
 const GLOBAL_SEO_RESTRICTIONS = `
 CRITICAL UNIVERSAL MICROSTOCK SEO MANDATES (HIGH-DOWNLOAD CONVERSION):
-1. BUYER SEARCH INTENT & VISUAL SPECIFICITY:
+1. BUYER SEARCH INTENT & VISUAL PIXEL ACCURACY:
 - Stock buyers search with concrete visual phrases, never vague AI hype!
-- Always specify WHO/WHAT + SPECIFIC ACTION + SETTING/ENVIRONMENT + LIGHTING/COMPOSITION/CONCEPT (e.g. "copy space", "flat lay", "close up", "aerial view", "minimalist", "warm sunlight", "remote work").
+- Scan EVERY zone of the image first: primary subject + materials, readable labels/numbers/screen text (e.g. "4TB", "HOT-SWAP", "AUTO DRIVE", "ECG", "COPY SPACE"), screen UI icons (heartbeat waveform vs fitness rings, GPS pin, shield), background/environment, depth bokeh, and large empty negative/copy space ("copy space" ONLY when a clearly open uncluttered area exists).
+- Always specify WHO/WHAT + SPECIFIC ACTION/STATE + SETTING/ENVIRONMENT + LIGHTING/COMPOSITION/CONCEPT. Avoid hollow glue words like "setting", "performing", "attached", or "mounted" in Titles/Top-10 keywords when stronger visual nouns or actions fit.
 - NEVER invent details that are not visibly present in the media.
 
 2. SMART DEMOGRAPHIC & CULTURAL ACCURACY:
@@ -57,8 +58,9 @@ CRITICAL UNIVERSAL MICROSTOCK SEO MANDATES (HIGH-DOWNLOAD CONVERSION):
 - HOWEVER, when cuisine, architecture, cultural dress, landmarks, or animal breeds are genuinely the subject (e.g. "Japanese ramen", "Italian pizza", "French bulldog", "Indian spice market"), DO preserve the authentic geographic/culinary/breed term because buyers specifically search for them!
 
 3. TITLE-TO-KEYWORD STRICT RANKING ALIGNMENT (ALGORITHM COMPLIANCE):
-- The first 5 to 10 keywords MUST be the core nouns, subjects, and action terms extracted directly from your generated Title in sequential order!
-- Generate extra surplus keywords (at least +6 more than requested, all 100% visually or conceptually accurate, NO singular/plural duplicates) so filtering never leaves gaps.
+- The first 5 to 10 keywords MUST be concrete core nouns, subjects, visual attributes, and synonyms matching your generated Title in descending importance order!
+- Generate extra surplus keywords (at least +10 more than requested, all 100% visually or conceptually accurate, NO singular/plural duplicates) so filtering never leaves gaps.
+- NEVER lazily repeat cliché words like "innovation" or "future" across different assets unless the visual scene genuinely represents that concept—choose specific buyer concepts (e.g., "telemetry", "cybersecurity", "precision", "autonomy", "logistics", "diagnosis", "storage", "sustainability", "recovery", "navigation").
 
 4. STRICT ZERO-TOLERANCE TRADEMARK & REGISTERED BRAND BAN:
 - ABSOLUTELY NEVER USE ANY REGISTERED TRADEMARKS, BRAND NAMES, COMPANY NAMES, OR PATENTED PRODUCT NAMES in Title, Description, or Keywords.
@@ -72,8 +74,9 @@ CRITICAL UNIVERSAL MICROSTOCK SEO MANDATES (HIGH-DOWNLOAD CONVERSION):
   * "macbook" -> "laptop computer"
   * "nike" / "adidas" / "lululemon" -> "sportswear" / "activewear" / "yoga apparel"
 
-5. TITLE PUNCTUATION & ACRONYMS:
-- Sentence case only, preserving acronyms (AI, 3D, VR, LED, 4K, UI, UX).
+5. TITLE PUNCTUATION, GRAMMAR & ACRONYMS:
+- Sentence case only, preserving acronyms (AI, 3D, VR, LED, SSD, CPU, ECG, HUD, 4K, 4TB, UI, UX) and planet Earth when referring to the planet.
+- Write a COMPLETE, natural phrase that fits cleanly within the character limit—NEVER end awkwardly mid-preposition (such as "...display in." or "...in a.").
 - ALWAYS end the generated Title with a single full stop (.) period.
 `;
 
@@ -86,13 +89,13 @@ export function getMarketplaceSeoProfile(
     case 'Adobe Stock': {
       const maxTitle = titleLength || 80;
       const totalKw = keywordsCount || 30;
-      const requestKw = Math.min(49, totalKw + 6);
+      const requestKw = Math.min(49, totalKw + 10);
       return {
         marketplace: 'Adobe Stock',
         engineName: 'Adobe Sensei Single-Word Engine',
         badge: '30 Single-Word • 60-80 Chars • 21 Categories',
         recommendedTitleLength: 80,
-        recommendedDescLength: 140,
+        recommendedDescLength: 0,
         recommendedKeywordsCount: 30,
         titleFormula: '[Main Subject] + [Primary Action/Attribute] + [Setting/Composition/Lighting]',
         keywordStrategy: '30 Pure Single-Word Combinatorial Keywords (Core Subject + Synonyms -> Components -> Visual -> Concepts)',
@@ -110,29 +113,30 @@ ${GLOBAL_SEO_RESTRICTIONS}
 
 ADOBE STOCK SPECIFIC RULES:
 1. Title:
-- Natural, clear descriptive Sentence case (preserve acronyms like 3D, AI, VR, 4K and proper nouns like Japanese, Christmas). Target 58 to ${maxTitle} characters.
+- Natural, clear descriptive Sentence case (preserve acronyms like 3D, AI, VR, SSD, ECG, 4TB and proper nouns like Japanese, Christmas, Earth). Target 58 to ${maxTitle} characters.
 - Formula: [Main Subject] + [Primary Action/Visual Feature] + [Setting/Lighting/Composition].
-- Put the main concrete subject noun cleanly near the start; avoid empty hype adjectives ("stunning", "amazing", "perfect", "beautiful", "high quality").
+- Put the main concrete subject noun cleanly near the start; avoid empty hype adjectives ("stunning", "amazing", "perfect", "beautiful", "high quality") and hollow filler ("in a modern factory setting" -> "in modern factory").
 
-2. Official Category (MUST pick ONE exact string from this list):
+2. Official Category (MUST pick ONE exact string from this list — do NOT default everything to Technology!):
 ${OFFICIAL_ADOBE_CATEGORIES.join(', ')}
+- Category Disambiguation: Use "Transport" for vehicles, EV interiors, autonomous cars, road barriers, highways, drones, aviation; "Industry" for factory robotics, battery assembly, recycling conveyors, warehouses; "Science" for medical surgery, prosthetic labs, pharmaceuticals, space stations, satellites in astronomy/cosmos; "People" for human hands/workers/elderly portraits; "Technology" for servers, SSDs, CPUs, fiber optics, cybersecurity, control panels, surveillance cameras.
 
 3. Keywords (${requestKw} PURE SINGLE-WORD commercial terms in STRICT descending relevance):
-- CRITICAL ADOBE RULE: EVERY keyword in the "keywords" array MUST be a SINGLE WORD (1 word only — NEVER 2-word or 3-word phrases like "circuit board", "artificial intelligence", "copy space", "dark background", "studio lighting"). Instead split every concept into separate high-power single words: "circuit", "board", "artificial", "intelligence", "copy", "space", "dark", "background", "studio", "lighting".
+- CRITICAL ADOBE RULE: EVERY keyword in the "keywords" array MUST be a SINGLE WORD (1 word only — NEVER 2-word or 3-word phrases like "circuit board", "artificial intelligence", "copy space", "dark background", "studio lighting", and never hyphenated multi-word tags like "hot-swap" or "self-driving"). Instead split every concept into separate high-power single words: "circuit", "board", "artificial", "intelligence", "copy", "space", "dark", "background", "hot", "swap", "self", "driving".
 - Deeply analyze the ACTUAL uploaded asset visually (examples below are format templates ONLY — never copy example words unless genuinely visible in the uploaded file!) and structure the single words into 4 conversion tiers:
-  * Positions 1-6 (Core Subject & Direct Synonyms): Main visible subject + top buyer synonyms FIRST (e.g. for tech: "computer", "chip", "processor", "cpu", "microchip"; for food: "ramen", "noodle", "soup", "bowl", "japanese", "meal"; for lifestyle: "woman", "laptop", "office", "remote", "work") — NEVER put minor adjectives ahead of the core subject noun.
-  * Positions 7-16 (Visible Components, Tools, Setting & Action): What is physically in the scene, domain nouns, materials, actions.
-  * Positions 17-24 (Colors, Lighting, Framing & Style): Visible colors, illumination, composition ("glowing", "warm", "sunlight", "minimalist", "closeup", "horizontal" or "vertical").
-  * Positions 25+ (Commercial Concepts & Industry): Abstract themes buyers filter by ("innovation", "wellness", "success", "lifestyle", "concept", "modern").
+  * Positions 1-6 (Core Subject & Direct Synonyms): Main visible subject + top buyer synonyms FIRST (e.g. for storage: "server", "ssd", "drive", "storage", "rack", "robot"; for tactile ECG monitor: "wearable", "monitor", "ecg", "heart", "pulse", "wrist"; for EV cabin: "car", "autonomous", "interior", "dashboard", "navigation", "vehicle") — NEVER put minor glue words ahead of the core subject noun.
+  * Positions 7-16 (Visible Components, Readable Labels, Setting & Action): Physical objects, screen/panel text tokens (excluding "4k" on still images), materials, actions.
+  * Positions 17-24 (Colors, Lighting, Copy Space, Framing & Style): Visible colors, illumination ("glowing", "bokeh", "night"), composition ("copy", "space", "minimalist", "closeup", "panoramic", "horizontal" or "vertical").
+  * Positions 25+ (Commercial Concepts & Industry): Abstract themes buyers actually filter by for this exact scene (e.g., "efficiency", "precision", "security", "telemetry", "recovery", "reliability", "connectivity", "sustainability", "autonomy"—adapt freshly per asset; DO NOT copy generic words like "innovation" or "future" unless essential).
 - Singular base forms preferred; DO NOT include both singular and plural of the same word.
-- Strictly NO filler fluff ("art", "high", "quality") and NO banned spam ("stock", "photo", "commercial", "free", "image", "picture", "wallpaper", trademarks).`,
+- Strictly NO filler fluff ("setting", "performing", "attached", "high", "quality") and NO banned spam ("stock", "photo", "commercial", "free", "image", "picture", "wallpaper", trademarks).`,
       };
     }
 
     case 'Shutterstock': {
       const maxTitle = titleLength || 130;
       const totalKw = keywordsCount || 45;
-      const requestKw = Math.min(50, totalKw + 5);
+      const requestKw = Math.min(50, totalKw + 8);
       return {
         marketplace: 'Shutterstock',
         engineName: 'Shutterstock mShot Search Engine',
@@ -175,7 +179,7 @@ ${OFFICIAL_SHUTTERSTOCK_CATEGORIES.join(', ')}
     case 'iStock': {
       const maxTitle = titleLength || 80;
       const totalKw = keywordsCount || 30;
-      const requestKw = Math.min(45, totalKw + 5);
+      const requestKw = Math.min(50, totalKw + 10);
       return {
         marketplace: marketplace,
         engineName: 'Getty / iStock ESP Taxonomy Engine',
@@ -212,7 +216,7 @@ GETTY / ISTOCK ESP RULES:
     case 'Magnific': {
       const maxTitle = titleLength || 90;
       const totalKw = keywordsCount || 35;
-      const requestKw = Math.min(50, totalKw + 6);
+      const requestKw = Math.min(50, totalKw + 10);
       return {
         marketplace: 'Magnific',
         engineName: 'Freepik / Magnific AI SEO Engine',
@@ -247,7 +251,7 @@ ${OFFICIAL_ADOBE_CATEGORIES.join(', ')}
 - Positions 1-10: Core visual subjects, actions, and art medium extracted directly from your Title.
 - Positions 11-22: Specific aesthetic style, medium, camera/render specs, and lighting (e.g., "cinematic lighting", "volumetric light", "shallow depth of field", "bokeh", "studio lighting", "matte finish", "hyperrealistic", "flat design", "3d illustration"—ONLY tag styles actually visible in the asset!).
 - Positions 23-30: Exact dominant color palette & atmosphere (e.g., "warm tones", "pastel colors", "dark moody", "golden hour", "vibrant").
-- Remaining slots: Commercial design buyer utility (e.g., "copy space", "background", "wallpaper", "banner", "poster", "editorial", "innovation", "luxury") + 3-5 conceptual emotion tags.
+- Remaining slots: Commercial design buyer utility (e.g., "copy space", "background", "wallpaper", "banner", "poster", "editorial", "luxury") + 3-5 varied conceptual emotion tags tailored to this exact image (never copy generic filler blindly).
 - Strictly NO singular/plural duplicates and NO trademarks.`,
       };
     }
@@ -276,7 +280,7 @@ ${GLOBAL_SEO_RESTRICTIONS}
 VECTEEZY SPECIFIC RULES:
 1. Title: Sentence case only, 55-${maxTitle} characters clearly identifying the graphic subject, illustration/vector style, and commercial usage.
 2. Official Category (pick best fit): ${OFFICIAL_ADOBE_CATEGORIES.join(', ')}.
-3. Keywords: Provide ${totalKw + 6} keywords covering graphic components, style ("flat design", "line art", "isometric", "hand drawn", "gradient", "seamless pattern", "icon"), design utility ("template", "banner", "poster", "ui element", "infographic", "wallpaper"), color scheme, and commercial themes. Top 8 match Title. No spam or trademarks.`,
+3. Keywords: Provide ${Math.min(50, totalKw + 10)} keywords covering graphic components, style ("flat design", "line art", "isometric", "hand drawn", "gradient", "seamless pattern", "icon"), design utility ("template", "banner", "poster", "ui element", "infographic", "wallpaper"), color scheme, and commercial themes. Top 8 match Title. No spam or trademarks.`,
       };
     }
 
@@ -305,7 +309,7 @@ RULES:
 1. Title: Sentence case only, 55-${maxTitle} chars, [Main Subject] + [Action] + [Setting/Lighting].
 2. Description: Full natural commercial sentence under 140 characters.
 3. Official Category (pick best fit): ${OFFICIAL_ADOBE_CATEGORIES.join(', ')}.
-4. Keywords: ${totalKw + 6} ranked keywords in descending relevance covering subject, action, lighting, composition, and concepts. Top 8 match Title terms. No singular/plural duplicates, no spam, no trademarks.`,
+4. Keywords: ${Math.min(50, totalKw + 10)} ranked keywords in descending relevance covering subject, action, lighting, composition, and concepts. Top 8 match Title terms. No singular/plural duplicates, no spam, no trademarks.`,
       };
     }
 
@@ -334,7 +338,7 @@ ${GLOBAL_SEO_RESTRICTIONS}
 RULES:
 1. Title: Sentence case only, 55-${maxTitle} characters. Formula: [Main Subject] + [Primary Action/Attribute] + [Setting/Concept].
 2. Official Category (pick ONE exact Adobe Stock category): ${OFFICIAL_ADOBE_CATEGORIES.join(', ')}.
-3. Keywords: ${totalKw + 6} keywords ordered by strict descending relevance. Top 8 match Title core terms in order. No singular/plural duplicates, no spam words, no trademarks.`,
+3. Keywords: ${Math.min(50, totalKw + 10)} keywords ordered by strict descending relevance. Top 8 match Title core terms in order. No singular/plural duplicates, no spam words, no trademarks.`,
       };
     }
   }

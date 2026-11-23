@@ -11,7 +11,12 @@ import {
   truncateAtWordBoundary,
 } from '../utils/stockSeoSanitizer';
 
-function drawImageOnWhiteCanvas(img: HTMLImageElement, maxDim = 800, mime: 'image/jpeg' | 'image/png' = 'image/jpeg'): string {
+function drawImageOnWhiteCanvas(
+  img: HTMLImageElement,
+  maxDim = 1152,
+  mime: 'image/jpeg' | 'image/png' = 'image/jpeg',
+  fillWhiteBackground = true
+): string {
   let width = img.naturalWidth || img.width || maxDim;
   let height = img.naturalHeight || img.height || maxDim;
   if (width === 0 || height === 0) {
@@ -32,9 +37,13 @@ function drawImageOnWhiteCanvas(img: HTMLImageElement, maxDim = 800, mime: 'imag
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   // White backdrop ensures dark transparent PNG/SVG vectors remain clearly visible to AI Vision
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
+  if (fillWhiteBackground) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+  }
   ctx.drawImage(img, 0, 0, width, height);
   return mime === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85);
 }
@@ -66,7 +75,7 @@ async function extractEmbeddedVectorPreview(file: File): Promise<string> {
     return await new Promise<string>((resolve) => {
       const img = new Image();
       img.onload = () => {
-        const out = drawImageOnWhiteCanvas(img, 800, 'image/jpeg');
+        const out = drawImageOnWhiteCanvas(img, 1200, 'image/jpeg', true);
         URL.revokeObjectURL(objUrl);
         resolve(out);
       };
@@ -81,7 +90,7 @@ async function extractEmbeddedVectorPreview(file: File): Promise<string> {
   }
 }
 
-// Fast high-fidelity thumbnail converter supporting Raster Images, SVG Vectors (rasterized to PNG), Videos (frame capture), and EPS/AI (embedded preview)
+// Fast high-fidelity thumbnail converter supporting Raster Images (1600px HD), SVG Vectors (rasterized to PNG), Videos (frame capture), and EPS/AI (embedded preview)
 export const fileToFastThumbnail = (file: File): Promise<string> => {
   return new Promise((resolve) => {
     if (!file) {
@@ -91,12 +100,12 @@ export const fileToFastThumbnail = (file: File): Promise<string> => {
 
     const lowerName = file.name.toLowerCase();
 
-    // 1. Rasterize SVG onto an 800px white-backed PNG so Gemini/Groq Vision can actually see vector artwork
+    // 1. Rasterize SVG onto a 1200px white-backed PNG so Gemini/Groq Vision sees fine vector details
     if (file.type === 'image/svg+xml' || lowerName.endsWith('.svg')) {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        const pngData = drawImageOnWhiteCanvas(img, 800, 'image/png');
+        const pngData = drawImageOnWhiteCanvas(img, 1200, 'image/png', true);
         URL.revokeObjectURL(url);
         resolve(pngData);
       };
@@ -109,7 +118,7 @@ export const fileToFastThumbnail = (file: File): Promise<string> => {
     }
 
     // 2. Capture representative video frame onto 800px JPEG for Vision analysis
-    if (file.type.startsWith('video/') || /\.(mp4|mov|webm|avi)$/i.test(lowerName)) {
+    if (file.type?.startsWith('video/') || /\.(mp4|mov|webm|avi|mkv|m4v)$/i.test(lowerName)) {
       const url = URL.createObjectURL(file);
       const video = document.createElement('video');
       video.preload = 'metadata';
@@ -138,9 +147,9 @@ export const fileToFastThumbnail = (file: File): Promise<string> => {
         clearTimeout(timer);
         try {
           const canvas = document.createElement('canvas');
-          const maxDim = 800;
-          let width = video.videoWidth || 800;
-          let height = video.videoHeight || 450;
+          const maxDim = 1280;
+          let width = video.videoWidth || 1280;
+          let height = video.videoHeight || 720;
           if (width > maxDim || height > maxDim) {
             if (width > height) {
               height = Math.round((height * maxDim) / width);
@@ -154,8 +163,10 @@ export const fileToFastThumbnail = (file: File): Promise<string> => {
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(video, 0, 0, width, height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
             cleanup();
             resolve(dataUrl);
             return;
@@ -182,24 +193,33 @@ export const fileToFastThumbnail = (file: File): Promise<string> => {
       return;
     }
 
-    // 4. Standard raster images (JPG, PNG, WebP, GIF, etc.)
+    // 4. Standard raster images (JPG, PNG, WebP, GIF, etc.) -> single-pass objectURL decode + 1152px @ 0.85 JPEG (~3-4x smaller upload, crisp OCR)
     if (!file.type.startsWith('image/')) {
       resolve('');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const dataUrl = drawImageOnWhiteCanvas(img, 800, 'image/jpeg');
-        resolve(dataUrl || (e.target?.result as string) || '');
-      };
-      img.onerror = () => resolve((e.target?.result as string) || '');
-      img.src = e.target?.result as string;
+    const needsWhiteBackdrop =
+      file.type === 'image/png' ||
+      file.type === 'image/gif' ||
+      file.type === 'image/webp' ||
+      /\.(png|gif|webp)$/i.test(lowerName);
+
+    const objUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const dataUrl = drawImageOnWhiteCanvas(img, 1152, 'image/jpeg', needsWhiteBackdrop);
+      URL.revokeObjectURL(objUrl);
+      resolve(dataUrl || '');
     };
-    reader.onerror = () => resolve('');
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(objUrl);
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    };
+    img.src = objUrl;
   });
 };
 
@@ -239,32 +259,48 @@ function fileToVideoDataUrl(file: File): Promise<string> {
   });
 }
 
-function extractImageMetaFromFile(file: File): Promise<MediaInspectionMeta> {
-  return new Promise((resolve) => {
-    if (!file || !file.type.startsWith('image/') || file.type === 'image/svg+xml') {
-      resolve({});
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const width = img.naturalWidth || img.width || 0;
-      const height = img.naturalHeight || img.height || 0;
-      URL.revokeObjectURL(url);
-      if (!width || !height) {
-        resolve({});
-        return;
-      }
-      const orientation: MediaInspectionMeta['orientation'] =
-        width > height * 1.05 ? 'horizontal' : height > width * 1.05 ? 'vertical' : 'square';
-      resolve({ width, height, orientation });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({});
-    };
-    img.src = url;
-  });
+function extractMetaFromImg(img: HTMLImageElement): MediaInspectionMeta | undefined {
+  const width = img.naturalWidth || img.width || 0;
+  const height = img.naturalHeight || img.height || 0;
+  if (!width || !height) return undefined;
+  const orientation: MediaInspectionMeta['orientation'] =
+    width > height * 1.05 ? 'horizontal' : height > width * 1.05 ? 'vertical' : 'square';
+  return { width, height, orientation };
+}
+
+async function fileToFastThumbnailWithMeta(
+  file: File
+): Promise<{ dataUrl: string; meta?: MediaInspectionMeta }> {
+  if (!file) return { dataUrl: '' };
+  const lowerName = file.name.toLowerCase();
+  if (file.type?.startsWith('image/') && file.type !== 'image/svg+xml' && !lowerName.endsWith('.svg')) {
+    const needsWhiteBackdrop =
+      file.type === 'image/png' ||
+      file.type === 'image/gif' ||
+      file.type === 'image/webp' ||
+      /\.(png|gif|webp)$/i.test(lowerName);
+
+    return new Promise((resolve) => {
+      const objUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const meta = extractMetaFromImg(img);
+        const dataUrl = drawImageOnWhiteCanvas(img, 1152, 'image/jpeg', needsWhiteBackdrop);
+        URL.revokeObjectURL(objUrl);
+        resolve({ dataUrl: dataUrl || '', meta });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        const reader = new FileReader();
+        reader.onload = (e) => resolve({ dataUrl: (e.target?.result as string) || '' });
+        reader.onerror = () => resolve({ dataUrl: '' });
+        reader.readAsDataURL(file);
+      };
+      img.src = objUrl;
+    });
+  }
+  const dataUrl = await fileToFastThumbnail(file);
+  return { dataUrl };
 }
 
 // Extracts a 2x2 chronological storyboard (15%, 40%, 65%, 85%) plus natural resolution & duration metadata
@@ -327,8 +363,8 @@ async function extractVideoStoryboardAndMeta(
 
       try {
         const aspect = width / Math.max(1, height);
-        const tileW = aspect >= 1 ? 480 : Math.max(240, Math.round(360 * aspect));
-        const tileH = Math.max(200, Math.round(tileW / aspect));
+        const tileW = aspect >= 1 ? 768 : Math.max(360, Math.round(540 * aspect));
+        const tileH = Math.max(240, Math.round(tileW / aspect));
 
         const positions = [
           { pct: 0.15, label: '15% START' },
@@ -345,6 +381,8 @@ async function extractVideoStoryboardAndMeta(
           finish('', baseMeta);
           return;
         }
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
 
         ctx.fillStyle = '#0b0d12';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -402,7 +440,7 @@ async function extractVideoStoryboardAndMeta(
           return;
         }
 
-        const storyboardDataUrl = canvas.toDataURL('image/jpeg', 0.84);
+        const storyboardDataUrl = canvas.toDataURL('image/jpeg', 0.88);
         finish(storyboardDataUrl, { ...baseMeta, hasStoryboard: true });
       } catch {
         finish('', baseMeta);
@@ -433,14 +471,16 @@ async function composeStoryboardFromDataUrls(frameUrls: string[]): Promise<strin
   const firstW = imgs[0].naturalWidth || 640;
   const firstH = imgs[0].naturalHeight || 360;
   const aspect = firstW / Math.max(1, firstH);
-  const tileW = aspect >= 1 ? 480 : Math.max(240, Math.round(360 * aspect));
-  const tileH = Math.max(200, Math.round(tileW / aspect));
+  const tileW = aspect >= 1 ? 768 : Math.max(360, Math.round(540 * aspect));
+  const tileH = Math.max(240, Math.round(tileW / aspect));
 
   const canvas = document.createElement('canvas');
   canvas.width = tileW * 2;
   canvas.height = tileH * 2;
   const ctx = canvas.getContext('2d');
   if (!ctx) return frameUrls[0];
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   ctx.fillStyle = '#0b0d12';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -454,18 +494,18 @@ async function composeStoryboardFromDataUrls(frameUrls: string[]): Promise<strin
     ctx.drawImage(imgs[i], x, y, tileW, tileH);
 
     ctx.save();
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold 14px sans-serif';
     const textW = ctx.measureText(labels[i] || `FRAME ${i + 1}`).width;
     ctx.fillStyle = 'rgba(11, 13, 18, 0.82)';
-    ctx.fillRect(x + 8, y + 8, textW + 16, 22);
+    ctx.fillRect(x + 8, y + 8, textW + 16, 24);
     ctx.fillStyle = '#ff7744';
-    ctx.fillRect(x + 8, y + 8, 3, 22);
+    ctx.fillRect(x + 8, y + 8, 3, 24);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(labels[i] || `FRAME ${i + 1}`, x + 16, y + 23);
+    ctx.fillText(labels[i] || `FRAME ${i + 1}`, x + 16, y + 25);
     ctx.restore();
   }
 
-  return canvas.toDataURL('image/jpeg', 0.84);
+  return canvas.toDataURL('image/jpeg', 0.88);
 }
 
 async function prepareServerVideoProxy(
@@ -544,12 +584,13 @@ async function prepareMediaPayload(
   resolvedPreviewUrl?: string;
   mediaContext?: MediaInspectionMeta;
 }> {
+  const hasFileBlob = asset.file instanceof Blob;
   const isVideo =
     asset.fileType === 'video' ||
-    Boolean(asset.file?.type.startsWith('video/')) ||
-    /\.(mp4|mov|webm|avi|mkv)$/i.test(asset.filename);
+    Boolean(hasFileBlob && asset.file?.type?.startsWith('video/')) ||
+    /\.(mp4|mov|webm|avi|mkv|m4v)$/i.test(asset.filename);
 
-  if (isVideo && asset.file) {
+  if (isVideo && hasFileBlob && asset.file) {
     // 1. Always try ultra-fast local browser <video> storyboard first (0MB upload!)
     const localResult = await extractVideoStoryboardAndMeta(asset.file);
     let storyboardDataUrl = localResult.storyboardDataUrl;
@@ -607,15 +648,12 @@ async function prepareMediaPayload(
   let imageData = '';
   let mediaContext: MediaInspectionMeta | undefined;
 
-  if (asset.file) {
+  if (hasFileBlob && asset.file) {
     try {
-      const [thumb, imgMeta] = await Promise.all([
-        fileToFastThumbnail(asset.file),
-        extractImageMetaFromFile(asset.file),
-      ]);
-      imageData = thumb;
-      if (imgMeta.width && imgMeta.height) {
-        mediaContext = imgMeta;
+      const { dataUrl, meta } = await fileToFastThumbnailWithMeta(asset.file);
+      imageData = dataUrl;
+      if (meta?.width && meta?.height) {
+        mediaContext = meta;
       }
     } catch (e) {
       console.warn('Fast thumbnail conversion warning:', e);
@@ -624,11 +662,14 @@ async function prepareMediaPayload(
     try {
       if (asset.previewUrl.startsWith('data:image/') && !asset.previewUrl.startsWith('data:image/svg+xml')) {
         imageData = asset.previewUrl;
-      } else if (asset.previewUrl.startsWith('blob:')) {
+      } else if (asset.previewUrl.startsWith('blob:') || asset.previewUrl.startsWith('https://')) {
         const resp = await fetch(asset.previewUrl);
-        const blob = await resp.blob();
-        if (blob) {
-          imageData = await fileToFastThumbnail(new File([blob], asset.filename, { type: blob.type }));
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 0) {
+            const safeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+            imageData = await fileToFastThumbnail(new File([blob], asset.filename, { type: safeType }));
+          }
         }
       }
     } catch (e) {
@@ -664,6 +705,7 @@ function extractJson(text: string): any {
 }
 
 const clientKeyCooldownUntil = new Map<string, number>();
+const clientUnsupportedModelUntil = new Map<string, number>();
 
 function prioritizeHealthyClientKeys(keys: string[]): string[] {
   const now = Date.now();
@@ -675,6 +717,23 @@ function prioritizeHealthyClientKeys(keys: string[]): string[] {
     else healthy.push(k);
   }
   return [...healthy, ...cooled];
+}
+
+function getFastClientModelCandidates(chosen?: string): string[] {
+  const chosenModel = chosen && chosen.trim() ? chosen.trim() : 'gemini-4-hydrogen';
+  const baseFreeModels = [
+    chosenModel,
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+  ];
+  if (chosenModel === 'gemini-4-neon' || chosenModel === 'gemini-3.1-pro-preview') {
+    baseFreeModels.push('gemini-3.1-pro-preview');
+  }
+  const now = Date.now();
+  const unique = baseFreeModels.filter((m, idx, arr) => arr.indexOf(m) === idx);
+  const supported = unique.filter((m) => (clientUnsupportedModelUntil.get(m) || 0) <= now);
+  return supported.length > 0 ? supported : unique;
 }
 
 // Client-side Direct Gemini API Call (Fallback when backend is unavailable on static hosts)
@@ -701,15 +760,7 @@ async function generateViaDirectGemini(
     hasMoreHealthyKeys?: boolean;
   }
 ) {
-  const chosenModel = model && model.trim() ? model.trim() : 'gemini-4-hydrogen';
-  const modelCandidates = [
-    chosenModel,
-    'gemini-4-hydrogen',
-    'gemini-3.1-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-4-neon',
-    'gemini-3.1-pro-preview',
-  ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+  const modelCandidates = getFastClientModelCandidates(model);
 
   const profile = getMarketplaceSeoProfile(
     params.marketplace,
@@ -737,30 +788,35 @@ async function generateViaDirectGemini(
 
   const promptText = `${profile.systemPrompt}
 
-TASK (100% VISUAL ACCURACY MANDATE):
+TASK (95-99% PIXEL-PRECISION VISUAL ACCURACY MANDATE):
 ${hasDirectVideo
-  ? `Watch the provided video file from start to end and describe PRECISELY what happens across the clip (subjects, motion, camera movement, setting, lighting) with ZERO guesswork. DO NOT rely on meaningless filenames like "${params.filename}".`
+  ? `Watch the provided video file from start to end and describe PRECISELY what happens across the clip (subjects, motion, camera movement, setting, lighting) with ZERO guesswork. Rely ONLY on the visual footage.`
   : hasVisualData
   ? params.fileType === 'video'
-    ? `Inspect the provided 4-frame chronological video storyboard (15%, 40%, 65%, 85% timestamps) and describe PRECISELY the subject, action progression, camera motion, lighting, and setting with ZERO guesswork. DO NOT rely on meaningless filenames like "${params.filename}".`
-    : `Inspect the provided image directly and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions. DO NOT rely on meaningless filenames like "${params.filename}" or camera numbers like "121 (46).jpg".`
-  : `No raster preview could be extracted for "${params.filename}" (${params.fileType || 'file'}). Base metadata ONLY on clear factual words in filename/instructions without inventing unrelated scenes.`}
+    ? `Inspect the provided 4-frame chronological video storyboard (15%, 40%, 65%, 85% timestamps) and describe PRECISELY the subject, action progression, camera motion, lighting, and setting with ZERO guesswork.`
+    : `Perform a thorough pixel-level visual inspection across ALL zones of the image BEFORE writing Title, Category, or Keywords:
+1. Main subject, materials, hardware/anatomy, uniform/clothing, and exact physical state (e.g., robotic gripper holding 4TB hot-swap SSD drive, tactical sleeve ECG/GPS wrist monitor vs sports watch, white EV autonomous cabin with panoramic glass roof and no steering wheel).
+2. Exact readable labels, numbers, and printed/screen text (only include text visibly readable—e.g. "4TB", "HOT-SWAP", "AUTO DRIVE ACTIVE", "COPY SPACE"). Never use "4k" in keywords on still photos even if printed on hardware.
+3. Screen/hologram UI icons & graphics (heartbeat waveform, GPS pin, shield wireframe, data chart, network globe).
+4. Background setting, depth/bokeh, motion-blur effects, lighting temperature, and whether large clean negative/copy space exists (tag "copy", "space" only when clearly present).`
+  : `No raster preview could be extracted for "${params.filename}" (${params.fileType || 'file'}). Base metadata ONLY on clear factual words in topic/instructions or clean filename nouns without inventing unrelated scenes.`}
 ${videoDirective}${imageFramingNote}
 ADDITIONAL ASSET PARAMETERS:
 ${params.advanceIsolatedTransparent ? `- ADVANCE TITLE REQUIREMENT: The asset is on a TRANSPARENT background. Ensure title ends with "isolated on transparent background" and keywords include ${params.marketplace === 'Adobe Stock' ? '"transparent", "background", "isolated", "cutout"' : '"transparent background", "isolated", "cut out"'}.` : ''}
 ${params.advanceIsolatedWhite ? `- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE background. Ensure title ends with "isolated on white background" and keywords include ${params.marketplace === 'Adobe Stock' ? '"white", "background", "isolated", "studio"' : '"white background", "isolated", "studio shot"'}.` : ''}
 ${params.advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${params.advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
-${params.includeConceptualKeywords !== false ? `- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
-Analyze the underlying mood, emotional resonance, and commercial message (e.g., "hope", "future", "innovation", "sustainability", "success", "teamwork").
+${params.includeConceptualKeywords !== false ? `- CONCEPTUAL KEYWORDS (3-5 SCENE-ACCURATE ABSTRACT TAGS):
+Analyze the true commercial purpose and mood of THIS exact image (e.g., efficiency, precision, security, telemetry, diagnostics, autonomy, reliability, connectivity, protection, sustainability). Avoid lazily repeating cliché filler like "innovation" or "future" unless directly fitting.
 Integrate those 3-5 top conceptual/abstract single-word keywords into the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
 - Description: ${params.descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : params.marketplace === 'Shutterstock' ? `Rich, complete, searchable Shutterstock title-sentence strictly within ${Math.max(120, params.descLength)} characters (max 200 chars).` : `Concise commercial description sentence under ${params.descLength} characters (never cut mid-word).`}
-- Category & Topic: Pick ONE exact official ${params.marketplace} category plus concise 2-3 word subject topic.
+- Category & Topic: Pick ONE exact official ${params.marketplace} category (e.g., Transport for vehicles/EV cabins/road barriers/highways; Industry for factory robots/recycling/warehouses; Science for surgical/labs/medicine/space stations; People for human hands/portraits; Technology for servers/chips/cameras/biometrics) plus a clean 2-3 word Subject/Topic.
 
 ${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${params.customPrompt.trim()}` : ''}
 
-Output ONLY valid JSON matching this schema:
+Output ONLY valid JSON matching this schema (keep "visualAudit" crisp, 15-25 words max):
 {
+  "visualAudit": "Brief 15-25 word pixel check: main subject/materials, readable labels, UI icons, setting/lighting",
   "title": "Accurate stock title",
   "topic": "Subject topic",
   "description": "Stock description",
@@ -792,18 +848,31 @@ Output ONLY valid JSON matching this schema:
   parts.push({ text: promptText });
 
   let lastError: any = null;
-  for (const currentModel of modelCandidates) {
+  for (let mIdx = 0; mIdx < modelCandidates.length; mIdx++) {
+    const currentModel = modelCandidates[mIdx];
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), hasDirectVideo ? 55000 : 30000);
+      const timeoutId = setTimeout(() => controller.abort(), hasDirectVideo ? 55000 : 18000);
 
-      const isGemini4 = currentModel.startsWith('gemini-4');
       const generationConfig: any = {
         responseMimeType: 'application/json',
       };
-      if (isGemini4) {
-        generationConfig.thinkingConfig = { thinkingLevel: 'LOW' };
+      if (hasDirectVideo) {
+        generationConfig.mediaResolution = 'MEDIA_RESOLUTION_MEDIUM';
+      } else if (hasVisualData) {
+        generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+      }
+
+      if (currentModel.startsWith('gemini-4')) {
+        generationConfig.thinkingConfig = {
+          thinkingLevel: currentModel === 'gemini-4-neon' ? 'HIGH' : 'LOW',
+        };
+      } else if (currentModel === 'gemini-3.1-flash-lite') {
+        generationConfig.thinkingConfig = { thinkingLevel: 'MINIMAL' };
+      } else if (currentModel === 'gemini-2.5-flash') {
+        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        generationConfig.temperature = 0.15;
       } else {
         generationConfig.temperature = 0.15;
       }
@@ -828,7 +897,7 @@ Output ONLY valid JSON matching this schema:
         lastError = new Error(errorMsg);
 
         if (response.status === 404 || errorMsg.toLowerCase().includes('not found')) {
-          console.warn(`Model ${currentModel} not found, trying fallback model...`);
+          clientUnsupportedModelUntil.set(currentModel, Date.now() + 600_000);
           continue;
         }
 
@@ -839,12 +908,11 @@ Output ONLY valid JSON matching this schema:
           errorMsg.toLowerCase().includes('resource_exhausted')
         ) {
           clientKeyCooldownUntil.set(apiKey.trim(), Date.now() + 45_000);
-          if (params.hasMoreHealthyKeys && currentModel === chosenModel) {
-            // Switch immediately to next healthy key without stalling on fallback models
+          // Switch immediately to next healthy key on this primary working model without stalling!
+          if (params.hasMoreHealthyKeys && mIdx === 0) {
             throw lastError;
           }
-          console.warn(`Model ${currentModel} rate limit/quota reached (${errorMsg}), waiting 1.5s and switching to fallback candidate...`);
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 800));
           continue;
         }
 
@@ -879,7 +947,7 @@ Output ONLY valid JSON matching this schema:
       }
 
       const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-      const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, params.keywordsCount || 30, params.marketplace);
+      const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, params.keywordsCount || 30, params.marketplace, params.fileType as any);
       const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
         ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
         : [];
@@ -898,19 +966,24 @@ Output ONLY valid JSON matching this schema:
       };
     } catch (err: any) {
       lastError = err;
+      const errLower = String(err?.message || '').toLowerCase();
       if (err?.name === 'AbortError') {
         lastError = new Error(`Request timed out for model ${currentModel}`);
+        if (params.hasMoreHealthyKeys && mIdx === 0) {
+          throw lastError;
+        }
         continue;
       }
+      if (params.hasMoreHealthyKeys && mIdx === 0 && (errLower.includes('429') || errLower.includes('quota') || errLower.includes('rate') || errLower.includes('resource_exhausted'))) {
+        throw err;
+      }
       if (
-        err?.message &&
-        (err.message.includes('not found') ||
-          err.message.includes('404') ||
-          err.message.includes('quota') ||
-          err.message.includes('rate') ||
-          err.message.includes('429'))
+        errLower.includes('not found') ||
+        errLower.includes('404') ||
+        errLower.includes('quota') ||
+        errLower.includes('rate') ||
+        errLower.includes('429')
       ) {
-        await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
       throw err;
@@ -979,16 +1052,19 @@ async function generateViaDirectGroq(
   userContent.push({
     type: 'text',
     text: `${profile.systemPrompt}
-TASK: ${params.fileType === 'video' ? 'Inspect the 4-frame video storyboard (15%, 40%, 65%, 85%) carefully' : 'Inspect the image carefully'} and output metadata optimized for ${params.marketplace}.
-${groqVideoDirective}${imageFramingNote}${params.advanceIsolatedTransparent ? '- Isolated on transparent background.\n' : ''}${params.advanceIsolatedWhite ? '- Isolated on white background.\n' : ''}${params.advanceVector ? '- Include Vector style tags.\n' : ''}${params.advanceIllustration ? '- Include Illustration style tags.\n' : ''}${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL INSTRUCTIONS:\n${params.customPrompt.trim()}\n` : ''}Output ONLY valid JSON matching this schema: {"title": "...", "topic": "...", "description": "...", "keywords": ["..."], "conceptualKeywords": ["..."], "category": "..."}`,
+TASK: ${params.fileType === 'video' ? 'Inspect the 4-frame video storyboard (15%, 40%, 65%, 85%) carefully' : 'Scan every zone of the image carefully (subject, readable labels, UI icons, copy space, lighting)'} and output metadata optimized for ${params.marketplace}.
+${groqVideoDirective}${imageFramingNote}${params.advanceIsolatedTransparent ? '- Isolated on transparent background.\n' : ''}${params.advanceIsolatedWhite ? '- Isolated on white background.\n' : ''}${params.advanceVector ? '- Include Vector style tags.\n' : ''}${params.advanceIllustration ? '- Include Illustration style tags.\n' : ''}${params.customPrompt && params.customPrompt.trim() && params.customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL INSTRUCTIONS:\n${params.customPrompt.trim()}\n` : ''}Output ONLY valid JSON matching this schema: {"visualAudit": "...", "title": "...", "topic": "...", "description": "...", "keywords": ["..."], "conceptualKeywords": ["..."], "category": "..."}`,
   });
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey.trim()}`,
       'Content-Type': 'application/json',
     },
+    signal: controller.signal,
     body: JSON.stringify({
       model: targetModel,
       messages: [{ role: 'user', content: userContent }],
@@ -997,6 +1073,7 @@ ${groqVideoDirective}${imageFramingNote}${params.advanceIsolatedTransparent ? '-
       response_format: { type: 'json_object' },
     }),
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -1020,7 +1097,7 @@ ${groqVideoDirective}${imageFramingNote}${params.advanceIsolatedTransparent ? '-
   }
 
   const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-  const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, params.keywordsCount || 30, params.marketplace);
+  const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, params.keywordsCount || 30, params.marketplace, params.fileType as any);
   const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
     ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
     : [];
@@ -1116,7 +1193,7 @@ export function generateClientFallbackMetadata(
           maxDescLength
         );
 
-  const alignedKeywords = alignKeywordsWithTitle(cleanedTitle, finalKeywords, targetKeywordsCount, marketplace);
+  const alignedKeywords = alignKeywordsWithTitle(cleanedTitle, finalKeywords, targetKeywordsCount, marketplace, isVectorType ? 'vector' : 'image');
 
   return {
     title: cleanedTitle,
@@ -1178,11 +1255,11 @@ export async function generateMetadataForAsset(
     );
   }
 
-  const candidateKeys: string[] = [];
+  const allPoolKeys: string[] = [];
   if (Array.isArray(settings.apiKeys) && settings.apiKeys.length > 0) {
     settings.apiKeys.forEach((k) => {
-      if (k && typeof k === 'string' && k.trim().length > 5 && !candidateKeys.includes(k.trim())) {
-        candidateKeys.push(k.trim());
+      if (k && typeof k === 'string' && k.trim().length > 5 && !allPoolKeys.includes(k.trim())) {
+        allPoolKeys.push(k.trim());
       }
     });
   }
@@ -1190,13 +1267,20 @@ export async function generateMetadataForAsset(
     settings.customApiKey &&
     typeof settings.customApiKey === 'string' &&
     settings.customApiKey.trim().length > 5 &&
-    !candidateKeys.includes(settings.customApiKey.trim())
+    !allPoolKeys.includes(settings.customApiKey.trim())
   ) {
-    candidateKeys.push(settings.customApiKey.trim());
+    allPoolKeys.push(settings.customApiKey.trim());
   }
 
+  const wantsGroq = settings.aiProvider === 'Groq Cloud';
+  const candidateKeys = allPoolKeys.filter((k) => (wantsGroq ? k.startsWith('gsk_') : !k.startsWith('gsk_')));
+
   if (candidateKeys.length === 0) {
-    throw new Error('API Key Required: Please add your Google Gemini or Groq API Key.');
+    throw new Error(
+      wantsGroq
+        ? 'Groq API Key Required: Please add a Groq Cloud API key (starts with gsk_) in API Key settings.'
+        : 'Gemini API Key Required: Please add your Google Gemini API Key in API Key settings.'
+    );
   }
 
   const rotatedKeys = [
@@ -1212,7 +1296,7 @@ export async function generateMetadataForAsset(
   if (!shouldFallbackToDirectClient) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), (videoData || videoProxyId) ? 75000 : 35000);
+      const timeoutId = setTimeout(() => controller.abort(), (videoData || videoProxyId) ? 95000 : 65000);
 
       const res = await fetch('/api/generate-metadata', {
         method: 'POST',
@@ -1264,7 +1348,7 @@ export async function generateMetadataForAsset(
         }
 
         const rawKeywords: string[] = Array.isArray(data.keywords) ? data.keywords : [];
-        const finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30, marketplace);
+        const finalKeywords = alignKeywordsWithTitle(finalTitle, rawKeywords, settings.keywordsCount || 30, marketplace, asset.fileType);
 
         return {
           ...data,
@@ -1289,7 +1373,7 @@ export async function generateMetadataForAsset(
       ) {
         isStaticHostMode = true;
         shouldFallbackToDirectClient = true;
-      } else if (res.status === 502 || res.status === 503 || res.status === 504) {
+      } else if ((res.status === 502 || res.status === 503 || res.status === 504) && !data?.error) {
         shouldFallbackToDirectClient = true;
       } else {
         serverErrorMessage = data?.error || `Server error (${res.status})`;
@@ -1311,7 +1395,7 @@ export async function generateMetadataForAsset(
     const currentKey = orderedCandidateKeys[i];
     const hasMoreKeys = i < orderedCandidateKeys.length - 1;
     try {
-      if (settings.aiProvider === 'Groq Cloud' || currentKey.startsWith('gsk_')) {
+      if (settings.aiProvider === 'Groq Cloud') {
         return await generateViaDirectGroq(currentKey, settings.model || '', {
           filename: asset.filename,
           fileType: asset.fileType,

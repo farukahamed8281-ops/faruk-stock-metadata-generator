@@ -116,18 +116,18 @@ export function normalizeCategoryForMarketplace(
     if (input.includes('health') || input.includes('medic') || input.includes('wellness') || input.includes('doctor')) return 'Healthcare/Medical';
     if (input.includes('holiday') || input.includes('festival') || input.includes('celebrat')) return 'Holidays';
     if (input.includes('vector') || input.includes('illustrat') || input.includes('graphic') || input.includes('clip')) return 'Illustrations/Clip-Art';
-    if (input.includes('industr') || input.includes('construct') || input.includes('factory')) return 'Industrial';
+    if (input.includes('industr') || input.includes('construct') || input.includes('factory') || input.includes('manufactur') || input.includes('robot') || input.includes('warehouse') || input.includes('machinery')) return 'Industrial';
+    if (input.includes('transport') || /\b(car|cars|vehicle|vehicles|auto|autos|automobile|automotive|highway|roadway)\b/.test(input)) return 'Transportation';
     if (input.includes('interior') || input.includes('room') || input.includes('furniture')) return 'Interiors';
     if (input.includes('nature') || input.includes('landscape') || input.includes('plant') || input.includes('flower') || input.includes('environment') || input.includes('forest')) return 'Nature';
     if (input.includes('object') || input.includes('product')) return 'Objects';
     if (input.includes('park') || input.includes('outdoor')) return 'Parks/Outdoor';
     if (input.includes('people') || input.includes('lifestyle') || input.includes('portrait') || input.includes('family')) return 'People';
     if (input.includes('relig') || input.includes('cultur') || input.includes('spirit')) return 'Religion';
-    if (input.includes('scien') || input.includes('lab') || input.includes('research')) return 'Science';
+    if (input.includes('scien') || input.includes('lab') || input.includes('research') || input.includes('space') || input.includes('astron') || input.includes('cosmos')) return 'Science';
     if (input.includes('sign') || input.includes('symbol') || input.includes('icon')) return 'Signs/Symbols';
     if (input.includes('sport') || input.includes('fitness') || input.includes('gym') || input.includes('exercise')) return 'Sports/Recreation';
-    if (input.includes('tech') || input.includes('digital') || input.includes('cyber') || input.includes('computer') || input.includes('ai')) return 'Technology';
-    if (input.includes('transport') || input.includes('car') || input.includes('vehicle') || input.includes('auto')) return 'Transportation';
+    if (input.includes('tech') || input.includes('digital') || input.includes('cyber') || input.includes('computer') || /\bai\b/.test(input) || input.includes('surveil') || input.includes('satellite') || input.includes('automat') || input.includes('network')) return 'Technology';
     if (input.includes('vintage') || input.includes('retro')) return 'Vintage';
     return 'Miscellaneous';
   }
@@ -137,6 +137,7 @@ export function normalizeCategoryForMarketplace(
   if (exactAdobe) return exactAdobe;
 
   if (input.includes('animal') || input.includes('pet') || input.includes('wildlife')) return 'Animals';
+  if (input.includes('transport') || /\b(car|cars|vehicle|vehicles|auto|autos|automobile|automotive|aviation|highway|traffic)\b/.test(input)) return 'Transport';
   if (input.includes('building') || input.includes('architect') || input.includes('interior') || input.includes('real estate')) return 'Buildings and Architecture';
   if (input.includes('business') || input.includes('finance') || input.includes('corporate') || input.includes('office')) return 'Business';
   if (input.includes('food') || input.includes('meal') || input.includes('culinary') || input.includes('kitchen')) return 'Food';
@@ -145,17 +146,16 @@ export function normalizeCategoryForMarketplace(
   if (input.includes('mind') || input.includes('emotion') || input.includes('mood') || input.includes('mental')) return 'States of Mind';
   if (input.includes('graphic') || input.includes('vector') || input.includes('illustrat') || input.includes('abstract') || input.includes('background') || input.includes('pattern') || input.includes('texture')) return 'Graphic Resources';
   if (input.includes('hobby') || input.includes('hobbies') || input.includes('leisure') || input.includes('craft') || input.includes('gaming')) return 'Hobbies and Leisure';
-  if (input.includes('industr') || input.includes('factory') || input.includes('manufactur') || input.includes('construct')) return 'Industry';
+  if (input.includes('industr') || input.includes('factory') || input.includes('manufactur') || input.includes('construct') || input.includes('warehouse') || input.includes('machinery')) return 'Industry';
   if (input.includes('landscape') || input.includes('mountain') || input.includes('nature') || input.includes('scenery') || input.includes('forest') || input.includes('ocean')) return 'Landscapes';
   if (input.includes('lifestyle') || input.includes('wellness') || input.includes('home') || input.includes('everyday')) return 'Lifestyle';
   if (input.includes('people') || input.includes('portrait') || input.includes('family') || input.includes('team')) return 'People';
   if (input.includes('plant') || input.includes('flower') || input.includes('botan') || input.includes('garden')) return 'Plants and Flowers';
   if (input.includes('cultur') || input.includes('relig') || input.includes('tradition') || input.includes('heritage')) return 'Culture and Religion';
-  if (input.includes('scien') || input.includes('medic') || input.includes('health') || input.includes('lab') || input.includes('research')) return 'Science';
+  if (input.includes('scien') || input.includes('medic') || input.includes('health') || input.includes('lab') || input.includes('research') || input.includes('astron') || input.includes('space station')) return 'Science';
   if (input.includes('social')) return 'Social Issues';
   if (input.includes('sport') || input.includes('fitness') || input.includes('gym') || input.includes('workout') || input.includes('exercise')) return 'Sports';
-  if (input.includes('tech') || input.includes('digital') || input.includes('computer') || input.includes('software') || input.includes('cyber') || input.includes('ai')) return 'Technology';
-  if (input.includes('transport') || input.includes('car') || input.includes('vehicle') || input.includes('aviation')) return 'Transport';
+  if (input.includes('tech') || input.includes('digital') || input.includes('computer') || input.includes('software') || input.includes('cyber') || /\bai\b/.test(input) || input.includes('surveil') || input.includes('server') || input.includes('automat') || input.includes('network')) return 'Technology';
   if (input.includes('travel') || input.includes('tourism') || input.includes('vacation') || input.includes('destination')) return 'Travel';
 
   return 'Lifestyle';
@@ -295,7 +295,8 @@ export const BANNED_TRADEMARKS = [
 ];
 
 export const BANNED_SPAM_WORDS = [
-  'stock photo', 'stock image', 'commercial use', 'free photo', 'free image',
+  'stock photo', 'stock image', 'stock photography', 'stock footage', 'commercial use',
+  'free photo', 'free image', 'royalty free', 'watermark', 'copyright',
   'free', 'photo', 'picture', 'image', 'vector graphics',
   'high resolution', 'dslr', 'raw', 'wallpaper', 'download',
   'shutterstock', 'adobe stock', 'getty images', 'istock', 'dreamstime', 'vecteezy',
@@ -307,9 +308,21 @@ const ART_MARKET_ALLOWED_OVERRIDES = new Set([
 
 const PRESERVED_UPPERCASE_TOKENS = new Set([
   'AI', '3D', '2D', '4K', '8K', 'HD', 'UHD', 'HDR', 'VR', 'AR', 'XR', 'UI', 'UX',
-  'LED', 'RGB', 'CMYK', 'GPS', 'QR', 'USB', 'CPU', 'GPU', 'CEO', 'CFO', 'HR', 'IT',
-  'PC', 'TV', 'EV', 'SUV', 'DIY', 'DNA', 'RNA', 'SEO', 'B2B', 'B2C', 'SaaS', 'API',
-  'EPS', 'SVG', 'PNG', 'JPG', 'JPEG', 'PDF', 'HTML', 'CSS', 'JSON', 'ATM', 'POS',
+  'LED', 'LCD', 'OLED', 'AMOLED', 'RGB', 'CMYK', 'GPS', 'QR', 'USB', 'HDMI',
+  'CPU', 'GPU', 'SSD', 'HDD', 'NVME', 'RAM', 'ROM', 'PCB', 'IC', 'SOC', 'BIOS',
+  'IOT', 'CCTV', 'HUD', 'CGI', 'NFC', 'RFID', 'UPS', 'HVAC', 'CNC', 'ABS',
+  'ECG', 'EKG', 'MRI', 'CT', 'ICU', 'TB', 'GB', 'MB', 'KB', 'AC', 'DC', 'UV', 'IR', 'RF', 'OCR',
+  '5G', '6G', '4G', 'LTE', 'WIFI', 'LAN', 'WAN', 'VPN', 'SSL', 'TLS', 'HTTP',
+  'CEO', 'CFO', 'HR', 'IT', 'PC', 'TV', 'EV', 'SUV', 'DIY', 'DNA', 'RNA',
+  'SEO', 'B2B', 'B2C', 'SAAS', 'API', 'EPS', 'SVG', 'PNG', 'JPG', 'JPEG', 'PDF',
+  'HTML', 'CSS', 'JSON', 'ATM', 'POS',
+]);
+
+// Glue words in English titles that should NOT be auto-promoted into Top-10 search keyword slots
+const LOW_SEO_PRIORITY_TITLE_WORDS = new Set([
+  'setting', 'performing', 'attached', 'mounted', 'featuring', 'showing', 'depicting',
+  'including', 'using', 'making', 'looking', 'placed', 'located', 'positioned',
+  'surrounded', 'installed', 'various', 'several', 'item', 'object', 'element', 'deep',
 ]);
 
 const STOP_WORDS = new Set([
@@ -344,8 +357,21 @@ const PRESERVED_PROPER_NOUNS = new Set([
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
 ]);
 
+const EARTH_CONTEXT_PREV_WORDS = new Set([
+  'orbit', 'orbits', 'orbiting', 'planet', 'from', 'above', 'around', 'toward', 'towards', 'view', 'near', 'over',
+]);
+
+const DANGLING_TRAILING_WORDS = new Set([
+  'in', 'on', 'at', 'with', 'for', 'of', 'by', 'to', 'from', 'into', 'onto', 'over', 'under', 'near',
+  'and', 'or', 'the', 'a', 'an', 'as', 'via', 'through', 'between', 'among',
+]);
+
+const VIDEO_ONLY_SPAM_KEYWORDS = new Set([
+  '4k', '8k', 'uhd', 'full hd', '1080p', '60fps', 'footage', 'video clip', 'b-roll', 'timelapse', 'time lapse', 'slow motion', 'seamless loop',
+]);
+
 /**
- * Formats text to Sentence case while preserving technical acronyms (AI, 3D, VR, LED, 4K) and proper nouns (Japanese, Christmas, Paris, etc.)
+ * Formats text to Sentence case while preserving technical acronyms (AI, 3D, VR, LED, SSD, 4K, 4TB, ECG) and proper nouns (Japanese, Christmas, Paris, Earth, etc.)
  */
 export function toSmartSentenceCase(text: string): string {
   if (!text) return '';
@@ -358,7 +384,19 @@ export function toSmartSentenceCase(text: string): string {
       if (PRESERVED_UPPERCASE_TOKENS.has(upper)) {
         return token.replace(stripped, upper === 'SAAS' ? 'SaaS' : upper);
       }
+      // Preserve alphanumeric capacity/spec tokens like 4TB, 512GB, 5K, 12K, 24V, 100W, 60GHz
+      const capacityMatch = stripped.match(/^(\d+)(tb|gb|mb|kb|k|mp|hz|ghz|mhz|v|w)$/i);
+      if (capacityMatch) {
+        const formatted = `${capacityMatch[1]}${capacityMatch[2].toUpperCase()}`;
+        return token.replace(stripped, formatted);
+      }
       const lowerClean = stripped.toLowerCase();
+      if (lowerClean === 'earth') {
+        const prevClean = idx > 0 ? tokens[idx - 1].replace(/[^a-zA-Z0-9]/g, '').toLowerCase() : '';
+        if (idx === 0 || EARTH_CONTEXT_PREV_WORDS.has(prevClean)) {
+          return token.replace(stripped, 'Earth');
+        }
+      }
       if (PRESERVED_PROPER_NOUNS.has(lowerClean)) {
         const titleCased = lowerClean.charAt(0).toUpperCase() + lowerClean.slice(1);
         return token.replace(stripped, titleCased);
@@ -373,19 +411,29 @@ export function toSmartSentenceCase(text: string): string {
 }
 
 /**
- * Truncates text cleanly on a word boundary so titles and descriptions are never chopped mid-word
+ * Truncates text cleanly on a word boundary and removes dangling trailing prepositions/articles
  */
 export function truncateAtWordBoundary(text: string, maxLength: number): string {
   if (!text || maxLength <= 0) return '';
-  const cleaned = text.trim();
-  if (cleaned.length <= maxLength) return cleaned;
+  let cleaned = text.trim();
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
 
   const slice = cleaned.substring(0, maxLength);
   const lastSpace = slice.lastIndexOf(' ');
-  if (lastSpace > Math.floor(maxLength * 0.55)) {
-    return slice.substring(0, lastSpace).replace(/[,;:\-\s]+$/, '').trim();
+  let candidate = lastSpace > Math.floor(maxLength * 0.5)
+    ? slice.substring(0, lastSpace)
+    : slice;
+
+  candidate = candidate.replace(/[,;:\-\s]+$/, '').trim();
+
+  // Strip dangling trailing prepositions/conjunctions/articles after truncation (e.g. "...display in" -> "...display")
+  const words = candidate.split(/\s+/);
+  while (words.length > 3 && DANGLING_TRAILING_WORDS.has(words[words.length - 1].toLowerCase().replace(/[^a-z]/g, ''))) {
+    words.pop();
   }
-  return slice.replace(/[,;:\-\s]+$/, '').trim();
+  return words.join(' ').replace(/[,;:\-\s]+$/, '').trim();
 }
 
 /**
@@ -431,6 +479,18 @@ export function sanitizeTitle(title: string): string {
   // Strip trailing punctuation before finalizing
   cleaned = cleaned.replace(/[.,;:!?\s]+$/, '').trim();
 
+  // Strip incomplete dangling trailing prepositions/articles (e.g. "...display in" -> "...display")
+  const titleTokens = cleaned.split(/\s+/);
+  const phrasalPrevVerbs = new Set(['turned', 'switched', 'logged', 'signed', 'zoomed', 'plugged', 'focused', 'locked']);
+  while (titleTokens.length > 4) {
+    const lastTok = titleTokens[titleTokens.length - 1].toLowerCase().replace(/[^a-z]/g, '');
+    const prevTok = titleTokens[titleTokens.length - 2].toLowerCase().replace(/[^a-z]/g, '');
+    if (!DANGLING_TRAILING_WORDS.has(lastTok)) break;
+    if ((lastTok === 'in' || lastTok === 'on') && phrasalPrevVerbs.has(prevTok)) break;
+    titleTokens.pop();
+  }
+  cleaned = titleTokens.join(' ').replace(/[.,;:!?\s]+$/, '').trim();
+
   // Ensure Sentence case (preserving acronyms) and ending with a single full stop (.)
   if (cleaned.length > 0) {
     cleaned = toSmartSentenceCase(cleaned);
@@ -443,9 +503,18 @@ export function sanitizeTitle(title: string): string {
 /**
  * Checks if a keyword contains banned terms
  */
-export function isKeywordBanned(kw: string, marketplace?: Marketplace): boolean {
+export function isKeywordBanned(
+  kw: string,
+  marketplace?: Marketplace,
+  fileType?: 'image' | 'video' | 'vector'
+): boolean {
   const lower = kw.toLowerCase().trim();
   if (!lower || lower.length < 2) return true;
+
+  // Reject video-only resolution/format spam tags on still images and vectors
+  if (fileType !== 'video' && VIDEO_ONLY_SPAM_KEYWORDS.has(lower)) {
+    return true;
+  }
 
   // Reject demographic race tags
   for (const term of ALWAYS_STRIP_DEMOGRAPHIC_TERMS) {
@@ -530,14 +599,37 @@ export function extractTitleKeyTerms(title: string): string[] {
   return words.filter((w) => !isKeywordBanned(w));
 }
 
+const IRREGULAR_SINGULAR_MAP: Record<string, string> = {
+  women: 'woman',
+  men: 'man',
+  children: 'child',
+  people: 'person',
+  teeth: 'tooth',
+  feet: 'foot',
+  mice: 'mouse',
+  geese: 'goose',
+  lens: 'lens',
+  lenses: 'lens',
+  buses: 'bus',
+  gases: 'gas',
+  viruses: 'virus',
+  news: 'news',
+  series: 'series',
+  species: 'species',
+  leaves: 'leaf',
+  knives: 'knife',
+  wives: 'wife',
+  lives: 'life',
+  wolves: 'wolf',
+  shelves: 'shelf',
+  halves: 'half',
+};
+
 function normalizeSingularStem(word: string): string {
   const w = word.toLowerCase().trim();
-  if (w === 'women') return 'woman';
-  if (w === 'men') return 'man';
-  if (w === 'children') return 'child';
-  if (w === 'people') return 'person';
+  if (IRREGULAR_SINGULAR_MAP[w]) return IRREGULAR_SINGULAR_MAP[w];
   if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y';
-  if (w.length > 4 && (w.endsWith('ches') || w.endsWith('shes') || w.endsWith('sses') || w.endsWith('xes'))) {
+  if (w.length > 4 && (w.endsWith('ches') || w.endsWith('shes') || w.endsWith('sses') || w.endsWith('xes') || w.endsWith('zes'))) {
     return w.slice(0, -2);
   }
   if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('us') && !w.endsWith('is')) {
@@ -564,7 +656,8 @@ export function alignKeywordsWithTitle(
   title: string,
   rawKeywords: string[],
   targetCount: number = 30,
-  marketplace?: Marketplace
+  marketplace?: Marketplace,
+  fileType?: 'image' | 'video' | 'vector'
 ): string[] {
   const finalKeywords: string[] = [];
   const seen = new Set<string>();
@@ -604,13 +697,13 @@ export function alignKeywordsWithTitle(
       }
     }
 
-    if (!clean || isKeywordBanned(clean, marketplace)) return '';
+    if (!clean || isKeywordBanned(clean, marketplace, fileType)) return '';
     return clean;
   };
 
   const pushKeyword = (kw: string) => {
     const clean = sanitizeTerm(kw);
-    if (!clean || isKeywordBanned(clean, marketplace)) return;
+    if (!clean || isKeywordBanned(clean, marketplace, fileType)) return;
 
     // Normalize phrase by singularizing the last word for duplicate singular/plural suppression
     const parts = clean.split(/\s+/);
@@ -627,7 +720,7 @@ export function alignKeywordsWithTitle(
   // Clean raw AI keywords first (rejecting multi-word spam/trademarks before splitting)
   const cleanAiKeywords = rawKeywords
     .map(sanitizeTerm)
-    .filter((k) => k.length > 1 && !isKeywordBanned(k, marketplace));
+    .filter((k) => k.length > 1 && !isKeywordBanned(k, marketplace, fileType));
 
   // Extract core title words (excluding stop words)
   const cleanedTitle = sanitizeTitle(title);
@@ -644,11 +737,31 @@ export function alignKeywordsWithTitle(
     const seenFlat = new Set<string>();
     const seenFlatNorm = new Set<string>();
 
+    const normalizeAdobeHyphen = (token: string): string[] => {
+      const cleanedTok = token.replace(/^[.,;:!?"'()]+|[.,;:!?"'()]+$/g, '').trim();
+      if (!cleanedTok) return [];
+      if (cleanedTok === 'close-up') return ['closeup'];
+      if (cleanedTok === 'wi-fi') return ['wifi'];
+      if (cleanedTok === 'hi-tech') return ['hitech'];
+      if (cleanedTok.includes('/')) {
+        return cleanedTok.split('/').filter((p) => p.length >= 2);
+      }
+      if (cleanedTok.includes('-')) {
+        const hyphenParts = cleanedTok.split('-').filter(Boolean);
+        // Split multi-word compounds like "hot-swap" -> ["hot", "swap"], "self-driving" -> ["self", "driving"],
+        // while keeping single-letter prefix compounds like "e-commerce", "t-shirt", "x-ray" intact.
+        if (hyphenParts.length >= 2 && hyphenParts.every((p) => p.length >= 3)) {
+          return hyphenParts;
+        }
+      }
+      return [cleanedTok];
+    };
+
     for (const kw of cleanAiKeywords) {
-      const tokens = kw
-        .split(/\s+/)
-        .map((t) => t.replace(/^[.,;:!?"'()]+|[.,;:!?"'()]+$/g, '').trim())
-        .filter((t) => t.length >= 2 && !STOP_WORDS.has(t) && !isKeywordBanned(t, marketplace));
+      const rawTokens = kw.split(/\s+/);
+      const tokens = rawTokens
+        .flatMap(normalizeAdobeHyphen)
+        .filter((t) => t.length >= 2 && !STOP_WORDS.has(t) && !isKeywordBanned(t, marketplace, fileType));
       for (const tok of tokens) {
         const norm = normalizeSingularStem(tok);
         if (!seenFlat.has(tok) && !seenFlatNorm.has(norm)) {
@@ -663,20 +776,20 @@ export function alignKeywordsWithTitle(
     const headWords = dedupedSingleWords.slice(0, headLimit);
     const tailWords = dedupedSingleWords.slice(headLimit);
 
-    // Find concrete title words missing from the top `targetCount` AI pool
+    // Find concrete buyer-searchable title words missing from top `targetCount` AI pool
+    // (Skip low-priority glue verbs/words like "setting", "performing", "attached", "mounted" so strong subject/visual nouns hold #7-12)
     const topPool = dedupedSingleWords.slice(0, targetCount);
     const missingTitleWords: string[] = [];
     for (const w of titleWords) {
-      if (isKeywordBanned(w, marketplace)) continue;
+      if (LOW_SEO_PRIORITY_TITLE_WORDS.has(w) || isKeywordBanned(w, marketplace, fileType)) continue;
       const inTopPool = topPool.some((k) => wordsMatchExactOrPlural(k, w));
       if (!inTopPool) {
-        // Prefer singular form if AI generated it further down in tailWords
         const laterMatch = tailWords.find((k) => wordsMatchExactOrPlural(k, w));
         missingTitleWords.push(laterMatch || w);
       }
     }
 
-    // Assemble: #1-6 Core Subject+Synonyms -> any missing Title words -> remaining ranked AI tiers up to targetCount
+    // Assemble: #1-6 Core Subject+Synonyms -> any missing concrete Title words -> remaining ranked AI tiers up to targetCount
     for (const tok of headWords) {
       if (finalKeywords.length >= targetCount) break;
       pushKeyword(tok);
@@ -728,13 +841,14 @@ export function alignKeywordsWithTitle(
     pushKeyword(item.kw);
   }
 
-  // STEP 2: Add essential single words from Title if not yet represented in keywords
+  // STEP 2: Add essential concrete single words from Title if not yet represented in keywords
   for (const w of titleWords) {
     if (finalKeywords.length >= targetCount) break;
+    if (LOW_SEO_PRIORITY_TITLE_WORDS.has(w)) continue;
     const alreadyCovered = finalKeywords.some((k) =>
       k.split(' ').some((part) => wordsMatchExactOrPlural(part, w))
     );
-    if (!alreadyCovered && !isKeywordBanned(w, marketplace)) {
+    if (!alreadyCovered && !isKeywordBanned(w, marketplace, fileType)) {
       pushKeyword(w);
     }
   }

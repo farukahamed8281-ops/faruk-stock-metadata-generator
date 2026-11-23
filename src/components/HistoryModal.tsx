@@ -1,13 +1,13 @@
 import React from 'react';
 import { X, Clock, Download, ArrowUpRight, Trash2, Layers, CheckCircle2 } from 'lucide-react';
-import { BatchHistoryRecord, StockAsset } from '../types';
+import { BatchHistoryRecord, Marketplace, StockAsset } from '../types';
 import { exportAssetsToCsv } from '../utils/csvExporter';
 
 interface HistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   history: BatchHistoryRecord[];
-  onLoadBatch: (assets: StockAsset[]) => void;
+  onLoadBatch: (assets: StockAsset[], marketplace?: Marketplace) => void;
   onClearHistory: () => void;
 }
 
@@ -79,7 +79,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
 
                   <button
                     onClick={() => {
-                      onLoadBatch(record.assets);
+                      onLoadBatch(record.assets, record.marketplace);
                       onClose();
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors"

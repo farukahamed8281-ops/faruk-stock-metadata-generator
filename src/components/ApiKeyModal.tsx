@@ -154,6 +154,14 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     message: string;
   } | null>(null);
 
+  // Reset transient feedback & input when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setVerifyStatus(null);
+      setNewKeyInput('');
+    }
+  }, [isOpen]);
+
   // Sync keyList and active provider/model when modal opens or props change
   useEffect(() => {
     if (isOpen) {
@@ -168,6 +176,12 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
   const currentProvider =
     PROVIDERS.find((p) => p.id === selectedProviderId) || PROVIDERS[0];
+
+  const isKeyForProvider = (key: string, providerId: string) =>
+    providerId === 'Groq Cloud' ? key.startsWith('gsk_') : !key.startsWith('gsk_');
+
+  const providerKeys = keyList.filter((k) => isKeyForProvider(k, currentProvider.id));
+  const otherProviderKeys = keyList.filter((k) => !isKeyForProvider(k, currentProvider.id));
 
   const handleProviderSelect = (providerId: string) => {
     setSelectedProviderId(providerId);
@@ -194,6 +208,24 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const trimmed = newKeyInput.trim();
     if (!trimmed) return;
 
+    // Prevent mixing provider key formats into the wrong provider tab
+    if (currentProvider.id === 'Google Gemini' && trimmed.startsWith('gsk_')) {
+      setVerifyStatus({
+        tested: true,
+        success: false,
+        message: "This is a Groq Cloud key (gsk_...). Please select 'Groq Cloud' on the left sidebar to add it.",
+      });
+      return;
+    }
+    if (currentProvider.id === 'Groq Cloud' && (trimmed.startsWith('AIza') || trimmed.startsWith('AQ.'))) {
+      setVerifyStatus({
+        tested: true,
+        success: false,
+        message: "This is a Google Gemini key. Please select 'Google Gemini' on the left sidebar to add it.",
+      });
+      return;
+    }
+
     if (keyList.includes(trimmed)) {
       setVerifyStatus({
         tested: true,
@@ -209,6 +241,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     try {
       let isVerified = false;
       let verifyMessage = '';
+      let explicitRejectionMessage = '';
 
       // Try server verify endpoint first
       try {
@@ -222,42 +255,73 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         if (res.ok && data?.valid) {
           isVerified = true;
           verifyMessage = data?.message || 'API Key verified successfully!';
+        } else if (res.status >= 400 && res.status < 500) {
+          explicitRejectionMessage = data?.error || data?.message || 'Invalid API Key. Please check your key and try again.';
         } else if (data?.error && !data.error.includes('Could not connect')) {
-          setVerifyStatus({
-            tested: true,
-            success: false,
-            message: data?.error || 'Invalid API Key. Please verify from Google AI Studio.',
-          });
-          return;
+          explicitRejectionMessage = data.error;
         }
-      } catch (backendErr) {
-        // Backend not running (static web hosting like Netlify/Vercel/GitHub Pages)
+      } catch {
+        // Backend unreachable (static web hosting)
       }
 
-      // If backend was unreachable or static mode, test directly from browser
+      if (explicitRejectionMessage) {
+        setVerifyStatus({
+          tested: true,
+          success: false,
+          message: explicitRejectionMessage,
+        });
+        return;
+      }
+
+      // If backend was unreachable, test directly from browser
       if (!isVerified) {
-        if (currentProvider.id === 'Groq Cloud' || trimmed.startsWith('gsk_')) {
+        if (currentProvider.id === 'Groq Cloud') {
           const groqRes = await fetch('https://api.groq.com/openai/v1/models', {
-            headers: { 'Authorization': `Bearer ${trimmed}` },
+            headers: { Authorization: `Bearer ${trimmed}` },
+            signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(10000) : undefined,
           }).catch(() => null);
-          if (groqRes && groqRes.ok) {
+
+          if (groqRes && (groqRes.ok || groqRes.status === 429 || groqRes.status === 503)) {
             isVerified = true;
-            verifyMessage = 'Groq API Key verified & connected directly!';
+            verifyMessage = groqRes.ok
+              ? 'Groq API Key verified & connected directly!'
+              : 'Groq API Key verified (authenticated under high traffic).';
+          } else if (groqRes && !groqRes.ok) {
+            explicitRejectionMessage = 'Invalid Groq API Key (rejected by Groq Cloud). Please generate a fresh key at console.groq.com/keys.';
           } else if (trimmed.startsWith('gsk_') && trimmed.length >= 20) {
             isVerified = true;
-            verifyMessage = 'Groq API Key saved successfully!';
+            verifyMessage = 'Groq API Key format validated and saved (network check skipped).';
           }
         } else {
-          // Google Gemini Direct Test
-          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(trimmed)}`).catch(() => null);
-          if (geminiRes && geminiRes.ok) {
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(trimmed)}`,
+            {
+              signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(10000) : undefined,
+            }
+          ).catch(() => null);
+
+          if (geminiRes && (geminiRes.ok || geminiRes.status === 429 || geminiRes.status === 503)) {
             isVerified = true;
-            verifyMessage = 'Google Gemini API Key verified directly & active!';
+            verifyMessage = geminiRes.ok
+              ? 'Google Gemini API Key verified directly & active!'
+              : 'Google Gemini API Key verified (currently high traffic, valid authentication).';
+          } else if (geminiRes && !geminiRes.ok) {
+            const errJson = await geminiRes.json().catch(() => ({}));
+            explicitRejectionMessage = errJson?.error?.message || 'Invalid Google Gemini API Key. Please create a fresh key at aistudio.google.com/app/apikey.';
           } else if ((trimmed.startsWith('AIzaSy') || trimmed.startsWith('AQ.')) && trimmed.length >= 25) {
             isVerified = true;
-            verifyMessage = 'Google Gemini API Key format validated and saved!';
+            verifyMessage = 'Google Gemini API Key format validated and saved (network check skipped).';
           }
         }
+      }
+
+      if (explicitRejectionMessage) {
+        setVerifyStatus({
+          tested: true,
+          success: false,
+          message: explicitRejectionMessage,
+        });
+        return;
       }
 
       if (isVerified) {
@@ -265,43 +329,35 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         saveUpdatedKeys(updated);
         setNewKeyInput('');
 
+        const updatedProviderCount = updated.filter((k) => isKeyForProvider(k, currentProvider.id)).length;
         setVerifyStatus({
           tested: true,
           success: true,
-          message: verifyMessage || `Key #${updated.length} verified & saved permanently!`,
+          message: verifyMessage || `${currentProvider.name} Key #${updatedProviderCount} verified & saved permanently!`,
         });
       } else {
         setVerifyStatus({
           tested: true,
           success: false,
-          message: 'Invalid API Key. Please get a fresh key from aistudio.google.com/app/apikey',
+          message:
+            currentProvider.id === 'Groq Cloud'
+              ? 'Invalid Groq Key format. Groq keys must start with gsk_ (console.groq.com/keys).'
+              : 'Invalid Gemini Key format. Keys must start with AIzaSy... or AQ... (aistudio.google.com/app/apikey).',
         });
       }
     } catch (e: any) {
-      // If network issue, allow valid key formats to be saved anyway
-      if (trimmed.length >= 20) {
-        const updated = [...keyList, trimmed];
-        saveUpdatedKeys(updated);
-        setNewKeyInput('');
-        setVerifyStatus({
-          tested: true,
-          success: true,
-          message: 'API Key saved to browser local storage!',
-        });
-      } else {
-        setVerifyStatus({
-          tested: true,
-          success: false,
-          message: e?.message || 'Could not verify key. Please ensure key is valid.',
-        });
-      }
+      setVerifyStatus({
+        tested: true,
+        success: false,
+        message: e?.message || 'Could not verify API key. Please check your connection and try again.',
+      });
     } finally {
       setIsVerifying(false);
     }
   };
 
-  const handleRemoveKey = (index: number) => {
-    const updated = keyList.filter((_, i) => i !== index);
+  const handleRemoveKey = (keyToRemove: string) => {
+    const updated = keyList.filter((k) => k !== keyToRemove);
     saveUpdatedKeys(updated);
     setVerifyStatus(null);
   };
@@ -353,9 +409,9 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
           <div className="p-3 rounded-xl bg-[#141822] border border-[#202736] text-[11px] text-gray-400 mt-4 flex flex-col gap-1">
             <div className="flex items-center gap-1 text-orange-400 font-semibold">
               <RotateCw className="w-3.5 h-3.5" />
-              <span>Auto Key Failover (3.5s)</span>
+              <span>Instant Auto Key Failover</span>
             </div>
-            <span>When one API hits its rate limit, it automatically pauses 3.5 seconds and calls the next API key in your pool.</span>
+            <span>When one API hits its rate limit or quota, it switches immediately to the next healthy API key in your pool without stalling.</span>
           </div>
         </div>
 
@@ -370,7 +426,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 </h2>
                 <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-bold text-[10px] tracking-wider uppercase flex items-center gap-1">
                   <RotateCw className="w-3 h-3 animate-spin" style={{ animationDuration: '6s' }} />
-                  {keyList.length > 0 ? `${keyList.length} Keys in Pool` : 'Free / Built-in'}
+                  {providerKeys.length > 0 ? `${providerKeys.length} ${currentProvider.id === 'Groq Cloud' ? 'Groq' : 'Gemini'} Keys` : '0 Keys Added'}
                 </span>
               </div>
             </div>
@@ -422,6 +478,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 <button
                   onClick={handleAddKey}
                   disabled={isVerifying || !newKeyInput.trim()}
+                  data-preserve-white="true"
                   className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-orange-600/20"
                 >
                   {isVerifying ? (
@@ -442,63 +499,63 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                   <span>SLOT CAPACITY & ROTATION POOL</span>
                 </span>
                 <span className={`font-mono text-xs tracking-wider px-2 py-0.5 rounded ${
-                  keyList.length >= 3 
+                  providerKeys.length >= 3 
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                    : keyList.length > 0 
+                    : providerKeys.length > 0 
                       ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' 
                       : 'bg-gray-800 text-gray-400'
                 }`}>
-                  {keyList.length >= 3 
-                    ? `🔥 ${keyList.length}/3+ UNLIMITED ROTATION` 
-                    : keyList.length === 2 
+                  {providerKeys.length >= 3 
+                    ? `🔥 ${providerKeys.length}/3+ UNLIMITED ROTATION` 
+                    : providerKeys.length === 2 
                       ? `2/3 SLOTS ACTIVE (Add 1 more for Unlimited)` 
-                      : keyList.length === 1 
+                      : providerKeys.length === 1 
                         ? `1/3 SLOT ACTIVE (Single Key Ready)` 
-                        : `0/3 SLOTS (Built-in Active)`}
+                        : `0/3 SLOTS (${hasGeminiKey && currentProvider.id === 'Google Gemini' ? 'Server Built-in Ready' : 'No Key Added'})`}
                 </span>
               </div>
 
               {/* Visual 3-Slot Bars */}
               <div className="grid grid-cols-3 gap-2.5 pt-0.5">
                 <div className={`p-2.5 rounded-lg border flex flex-col gap-1 text-[11px] transition-all ${
-                  keyList.length >= 1 
+                  providerKeys.length >= 1 
                     ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300' 
                     : 'bg-[#12151c] border-[#222836] text-gray-500'
                 }`}>
                   <div className="flex items-center justify-between font-bold">
                     <span>Slot 1</span>
-                    {keyList.length >= 1 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <span>Empty</span>}
+                    {providerKeys.length >= 1 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <span>Empty</span>}
                   </div>
                   <span className="text-[10px] text-gray-400">
-                    {keyList.length >= 1 ? 'Active & Ready' : 'Add 1st Key to Activate'}
+                    {providerKeys.length >= 1 ? 'Active & Ready' : 'Add 1st Key to Activate'}
                   </span>
                 </div>
 
                 <div className={`p-2.5 rounded-lg border flex flex-col gap-1 text-[11px] transition-all ${
-                  keyList.length >= 2 
+                  providerKeys.length >= 2 
                     ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300' 
                     : 'bg-[#12151c] border-[#222836] text-gray-500'
                 }`}>
                   <div className="flex items-center justify-between font-bold">
                     <span>Slot 2</span>
-                    {keyList.length >= 2 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <span>Optional</span>}
+                    {providerKeys.length >= 2 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <span>Optional</span>}
                   </div>
                   <span className="text-[10px] text-gray-400">
-                    {keyList.length >= 2 ? 'Load Balancing' : 'Add 2nd Key for 2x Speed'}
+                    {providerKeys.length >= 2 ? 'Load Balancing' : 'Add 2nd Key for 2x Speed'}
                   </span>
                 </div>
 
                 <div className={`p-2.5 rounded-lg border flex flex-col gap-1 text-[11px] transition-all ${
-                  keyList.length >= 3 
+                  providerKeys.length >= 3 
                     ? 'bg-emerald-950/30 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)]' 
                     : 'bg-[#12151c] border-[#222836] text-gray-500'
                 }`}>
                   <div className="flex items-center justify-between font-bold">
                     <span>Slot 3 (Unlimited)</span>
-                    {keyList.length >= 3 ? <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> : <span>Unlock</span>}
+                    {providerKeys.length >= 3 ? <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> : <span>Unlock</span>}
                   </div>
                   <span className="text-[10px] text-gray-400">
-                    {keyList.length >= 3 ? '🔥 Unlimited Batch Mode' : 'Add 3rd Key for Unlimited'}
+                    {providerKeys.length >= 3 ? '🔥 Unlimited Batch Mode' : 'Add 3rd Key for Unlimited'}
                   </span>
                 </div>
               </div>
@@ -509,9 +566,9 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5 text-orange-500" />
-                  <span>ACTIVE KEY ROTATION POOL ({keyList.length})</span>
+                  <span>{currentProvider.name.toUpperCase()} POOL ({providerKeys.length})</span>
                 </label>
-                {keyList.length > 0 && (
+                {providerKeys.length > 1 && (
                   <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Multi-Key Auto Failover Enabled
@@ -519,27 +576,25 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 )}
               </div>
 
-              {keyList.length === 0 ? (
+              {providerKeys.length === 0 ? (
                 <div className="p-4 rounded-xl bg-[#171b24] border border-[#273042] flex items-center justify-between text-xs text-gray-400">
                   <div className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-orange-400" />
                     <span>
-                      {hasGeminiKey
-                        ? 'Add your own API Key above for private per-user AI Vision.'
-                        : 'No personal API Key added yet. Add your own free API Key above.'}
+                      {currentProvider.id === 'Google Gemini' && hasGeminiKey
+                        ? 'Server fallback Gemini key available. Add your own key above for dedicated RPM & privacy.'
+                        : `No ${currentProvider.name} Key added yet. Paste a key above to enable ${currentProvider.name}.`}
                     </span>
                   </div>
-                  <span className="text-orange-400 font-semibold">Private Mode</span>
+                  <span className="text-orange-400 font-semibold shrink-0 ml-2">Private Mode</span>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  {keyList.map((k, idx) => {
-                    const isGemini = selectedProviderId === 'Google Gemini';
-                    const isValidGeminiKey = k.startsWith('AIzaSy') || k.startsWith('AQ.');
-
+                  {providerKeys.map((k, idx) => {
+                    const isGroq = k.startsWith('gsk_');
                     return (
                       <div
-                        key={idx}
+                        key={k}
                         className="p-3 rounded-xl border flex items-center justify-between text-xs transition-all bg-[#171b24] border-[#273042]"
                       >
                         <div className="flex items-center gap-2.5 flex-wrap">
@@ -552,16 +607,13 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                               PRIMARY
                             </span>
                           )}
-
-                          {isGemini && isValidGeminiKey && (
-                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold flex items-center gap-1 border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Active & Verified Key
-                            </span>
-                          )}
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold flex items-center gap-1 border border-emerald-500/30">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" /> {isGroq ? 'Groq Active' : 'Gemini Active'}
+                          </span>
                         </div>
 
                         <button
-                          onClick={() => handleRemoveKey(idx)}
+                          onClick={() => handleRemoveKey(k)}
                           className="p-1.5 rounded-lg hover:bg-rose-950/40 text-gray-400 hover:text-rose-400 transition-colors cursor-pointer shrink-0 ml-2"
                           title="Remove Key"
                         >
@@ -570,6 +622,36 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {otherProviderKeys.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-[#202634] flex flex-col gap-1.5">
+                  <span className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">
+                    Other Provider Keys Saved ({otherProviderKeys.length})
+                  </span>
+                  <div className="flex flex-col gap-1.5">
+                    {otherProviderKeys.map((k) => (
+                      <div
+                        key={k}
+                        className="px-3 py-2 rounded-lg border flex items-center justify-between text-[11px] bg-[#14171d] border-[#222836] opacity-80"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="px-1.5 py-0.5 rounded bg-[#202736] text-gray-300 font-mono text-[10px]">
+                            {k.startsWith('gsk_') ? 'Groq' : 'Gemini'}
+                          </span>
+                          <span className="font-mono text-gray-400">{maskKey(k)}</span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveKey(k)}
+                          className="p-1 rounded hover:bg-rose-950/40 text-gray-400 hover:text-rose-400 transition-colors cursor-pointer"
+                          title="Remove Key"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -600,6 +682,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             </span>
             <button
               onClick={onClose}
+              data-preserve-white="true"
               className="px-6 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition-colors cursor-pointer"
             >
               Done

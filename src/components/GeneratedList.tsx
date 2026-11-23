@@ -4,7 +4,7 @@ import {
   RefreshCw,
   FileArchive,
 } from 'lucide-react';
-import { StockAsset, Marketplace } from '../types';
+import { StockAsset, Marketplace, GenerationSettings } from '../types';
 import { MetadataItemCard } from './MetadataItemCard';
 
 interface GeneratedListProps {
@@ -16,12 +16,17 @@ interface GeneratedListProps {
   onDownloadZip?: () => void;
   onDownloadSingle?: (id: string) => void;
   onCopyText: (text: string, label: string) => void;
-  onExportCsv: () => void;
   onGeneratePrompt?: (id: string) => void;
+  onExportCsv: () => void;
   selectedMarketplace: Marketplace;
   isGenerating?: boolean;
   authorName?: string;
   themeColor?: string;
+  titleLengthLimit?: number;
+  titleCaseStyle?: GenerationSettings['titleCaseStyle'];
+  fileExtension?: string;
+  autoRenameToTitle?: boolean;
+  includeTimestamp?: boolean;
 }
 
 export const GeneratedList: React.FC<GeneratedListProps> = ({
@@ -39,6 +44,11 @@ export const GeneratedList: React.FC<GeneratedListProps> = ({
   isGenerating = false,
   authorName,
   themeColor = '#ff5533',
+  titleLengthLimit,
+  titleCaseStyle,
+  fileExtension,
+  autoRenameToTitle,
+  includeTimestamp,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -104,6 +114,7 @@ export const GeneratedList: React.FC<GeneratedListProps> = ({
             <button
               type="button"
               onClick={onDownloadZip || onExportCsv}
+              data-preserve-white="true"
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-extrabold transition-all hover:brightness-110 cursor-pointer active:scale-95 shadow-lg"
               style={{
                 backgroundColor: activeColor,
@@ -153,6 +164,11 @@ export const GeneratedList: React.FC<GeneratedListProps> = ({
               marketplace={selectedMarketplace}
               defaultAuthor={authorName}
               themeColor={activeColor}
+              titleLengthLimit={titleLengthLimit}
+              titleCaseStyle={titleCaseStyle}
+              fileExtension={fileExtension}
+              autoRenameToTitle={autoRenameToTitle}
+              includeTimestamp={includeTimestamp}
             />
           ))}
 

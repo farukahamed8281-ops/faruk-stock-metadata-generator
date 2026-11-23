@@ -185,7 +185,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
             <div className="relative group">
               <Info className="w-3.5 h-3.5 text-gray-400 cursor-pointer" />
               <div className="hidden group-hover:block absolute left-5 -top-1 z-30 bg-[#12151b] border border-[#2d3546] text-gray-300 text-[11px] p-2.5 rounded-lg w-56 shadow-xl leading-relaxed">
-                Processes 2-3 files simultaneously in parallel. If any API hits its quota or rate limit, it automatically pauses for 3.5s and calls the next API key or model.
+                Processes 2-3 files simultaneously in parallel. If any API hits its quota or rate limit, it switches immediately to the next healthy API key or model in your pool.
               </div>
             </div>
           </div>
@@ -480,7 +480,10 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
                     key={gen.id}
                     type="button"
                     onClick={() => onUpdateSettings({ targetPromptGenerator: gen.id as any })}
+                    data-preserve-white={settings.targetPromptGenerator === gen.id ? 'true' : undefined}
                     className={`text-[11px] py-1 px-1.5 rounded text-center transition-all cursor-pointer font-medium ${
+                      gen.id === 'universal' ? 'col-span-3' : ''
+                    } ${
                       settings.targetPromptGenerator === gen.id
                         ? 'bg-orange-600 text-white font-bold shadow-sm'
                         : 'bg-[#1b202a] hover:bg-[#252c3b] text-gray-300'
@@ -543,6 +546,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
                 type="button"
                 disabled={!hasAssets || isGeneratingPrompts}
                 onClick={onGenerateAllPrompts}
+                data-preserve-white="true"
                 className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold text-white transition-all shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-1"
                 style={{ backgroundColor: activeThemeColor }}
               >
@@ -920,6 +924,7 @@ export const GenerationControls: React.FC<GenerationControlsProps> = ({
         {/* Save Settings Button */}
         <button
           type="button"
+          data-preserve-white="true"
           onClick={() => {
             if (onSaveSettings) {
               onSaveSettings();

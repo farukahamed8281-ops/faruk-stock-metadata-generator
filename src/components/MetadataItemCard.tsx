@@ -17,12 +17,16 @@ import {
   UserCheck,
   User,
 } from 'lucide-react';
-import { StockAsset, Marketplace } from '../types';
+import { StockAsset, Marketplace, GenerationSettings } from '../types';
 import { generateRenamedFilename } from '../utils/zipExporter';
 import {
   OFFICIAL_ADOBE_CATEGORIES,
   OFFICIAL_SHUTTERSTOCK_CATEGORIES,
   normalizeCategoryForMarketplace,
+  sanitizeTitle,
+  toSmartSentenceCase,
+  truncateAtWordBoundary,
+  alignKeywordsWithTitle,
 } from '../utils/stockSeoSanitizer';
 
 interface MetadataItemCardProps {
@@ -36,6 +40,11 @@ interface MetadataItemCardProps {
   marketplace?: Marketplace;
   defaultAuthor?: string;
   themeColor?: string;
+  titleLengthLimit?: number;
+  titleCaseStyle?: GenerationSettings['titleCaseStyle'];
+  fileExtension?: string;
+  autoRenameToTitle?: boolean;
+  includeTimestamp?: boolean;
 }
 
 export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
@@ -49,8 +58,13 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   marketplace,
   defaultAuthor,
   themeColor = '#ff5533',
+  titleLengthLimit = 80,
+  titleCaseStyle = 'sentenceCase',
+  fileExtension,
+  autoRenameToTitle = true,
+  includeTimestamp = false,
 }) => {
-  const activeMarketplace: Marketplace = asset.marketplace || marketplace || 'Adobe Stock';
+  const activeMarketplace: Marketplace = marketplace || asset.marketplace || 'Adobe Stock';
   const categoryOptions =
     activeMarketplace === 'Shutterstock'
       ? OFFICIAL_SHUTTERSTOCK_CATEGORIES
@@ -133,6 +147,22 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
       title = `${title} ${suffixText.trim()}`;
     }
 
+    title = sanitizeTitle(title);
+
+    if (titleCaseStyle === 'titleCase') {
+      title = title.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.substring(1).toLowerCase());
+    } else if (titleCaseStyle === 'sentenceCase' || titleCaseStyle === 'default') {
+      title = toSmartSentenceCase(title);
+    } else if (titleCaseStyle === 'upperCase') {
+      title = title.toUpperCase();
+    } else if (titleCaseStyle === 'lowerCase') {
+      title = title.toLowerCase();
+    }
+
+    if (titleLengthLimit > 0 && title.length > titleLengthLimit) {
+      title = truncateAtWordBoundary(title.replace(/\.+$/, ''), titleLengthLimit - 1);
+    }
+
     // Ensure title ends with a single full stop (.)
     title = title.replace(/[.,;:!?\s]+$/, '').trim();
     if (title.length > 0) {
@@ -155,6 +185,16 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
 
     const newTitle = recalculateTitle(overrides);
     overrides.title = newTitle;
+    if (asset.keywords && asset.keywords.length > 0) {
+      const basePool = asset.rawKeywords && asset.rawKeywords.length > 0 ? asset.rawKeywords : asset.keywords;
+      overrides.keywords = alignKeywordsWithTitle(
+        newTitle,
+        basePool,
+        asset.keywords.length,
+        activeMarketplace,
+        asset.fileType
+      );
+    }
     onUpdateAsset(asset.id, overrides);
   };
 
@@ -170,10 +210,19 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   };
 
   const handleSaveEdit = () => {
-    const parsedKeywords = editKeywords
+    const seenKw = new Set<string>();
+    const parsedKeywords: string[] = [];
+    editKeywords
       .split(',')
       .map((k) => k.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .forEach((k) => {
+        const low = k.toLowerCase();
+        if (!seenKw.has(low)) {
+          seenKw.add(low);
+          parsedKeywords.push(k);
+        }
+      });
 
     let savedTitle = (editTitle || '').trim();
     if (savedTitle.length > 0) {
@@ -183,12 +232,18 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
       }
     }
 
+    const cleanCategory = normalizeCategoryForMarketplace(editCategory, activeMarketplace);
+    const cleanedDesc = editDesc.trim();
+
     onUpdateAsset(asset.id, {
       title: savedTitle,
-      topic: editTopic,
-      category: normalizeCategoryForMarketplace(editCategory, activeMarketplace),
-      description: editDesc,
+      rawTitle: savedTitle,
+      topic: editTopic.trim() || cleanCategory,
+      category: cleanCategory,
+      description: cleanedDesc,
+      rawDescription: cleanedDesc,
       keywords: parsedKeywords,
+      rawKeywords: parsedKeywords,
       imagePrompt: editImagePrompt,
       author: editAuthor.trim() || undefined,
     });
@@ -210,10 +265,17 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
   const descLength = (asset.description || '').length;
   const keywordsCount = (asset.keywords || []).length;
 
-  // Generate preview of clean auto-renamed filename
-  const previewRenamedFilename = asset.title
-    ? generateRenamedFilename(asset.filename, asset.title)
-    : asset.filename;
+  // Generate preview matching ZIP export rename rules
+  const cleanExtOverride =
+    fileExtension && fileExtension.trim() && fileExtension.toLowerCase() !== 'default'
+      ? fileExtension.trim().replace(/^\./, '')
+      : null;
+  const previewRenamedFilename =
+    autoRenameToTitle && asset.title
+      ? generateRenamedFilename(asset.filename, asset.title, fileExtension, includeTimestamp)
+      : cleanExtOverride
+      ? asset.filename.replace(/\.[^/.]+$/, '') + '.' + cleanExtOverride
+      : asset.filename;
 
   return (
     <div className="bg-[#141720]/95 border border-[#252b38] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:gap-5 shadow-[0_4px_22px_rgba(0,0,0,0.45)] transition-all hover:border-orange-500/40 backdrop-blur-md">
@@ -336,6 +398,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             <button
               type="button"
               onClick={() => handleToggleOption('advanceIsolatedTransparent', asset.advanceIsolatedTransparent)}
+              data-preserve-white={asset.advanceIsolatedTransparent ? 'true' : undefined}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
                 asset.advanceIsolatedTransparent
                   ? 'bg-orange-500 text-white shadow-sm font-semibold'
@@ -349,6 +412,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             <button
               type="button"
               onClick={() => handleToggleOption('advanceIsolatedWhite', asset.advanceIsolatedWhite)}
+              data-preserve-white={asset.advanceIsolatedWhite ? 'true' : undefined}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
                 asset.advanceIsolatedWhite
                   ? 'bg-orange-500 text-white shadow-sm font-semibold'
@@ -362,6 +426,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             <button
               type="button"
               onClick={() => handleToggleOption('advanceVector', asset.advanceVector)}
+              data-preserve-white={asset.advanceVector ? 'true' : undefined}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
                 asset.advanceVector
                   ? 'bg-orange-500 text-white shadow-sm font-semibold'
@@ -375,6 +440,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             <button
               type="button"
               onClick={() => handleToggleOption('advanceIllustration', asset.advanceIllustration)}
+              data-preserve-white={asset.advanceIllustration ? 'true' : undefined}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
                 asset.advanceIllustration
                   ? 'bg-orange-500 text-white shadow-sm font-semibold'
@@ -388,6 +454,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             <button
               type="button"
               onClick={() => handleToggleOption('advancePrefixEnabled', asset.advancePrefixEnabled)}
+              data-preserve-white={asset.advancePrefixEnabled ? 'true' : undefined}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
                 asset.advancePrefixEnabled
                   ? 'bg-orange-500 text-white shadow-sm font-semibold'
@@ -401,6 +468,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
             <button
               type="button"
               onClick={() => handleToggleOption('advanceSuffixEnabled', asset.advanceSuffixEnabled)}
+              data-preserve-white={asset.advanceSuffixEnabled ? 'true' : undefined}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
                 asset.advanceSuffixEnabled
                   ? 'bg-orange-500 text-white shadow-sm font-semibold'
@@ -489,6 +557,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
               <button
                 type="button"
                 onClick={handleSaveEdit}
+                data-preserve-white="true"
                 className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
@@ -698,7 +767,6 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                             ? {
                                 borderColor: `${themeColor}70`,
                                 backgroundColor: `${themeColor}1f`,
-                                color: '#ffad99',
                               }
                             : undefined
                         }
@@ -762,6 +830,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                             key={eng}
                             type="button"
                             onClick={() => setSelectedPromptEngine(eng)}
+                            data-preserve-white={selectedPromptEngine === eng ? 'true' : undefined}
                             className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer capitalize font-medium ${
                               selectedPromptEngine === eng
                                 ? 'bg-orange-600 text-white font-bold'
@@ -799,6 +868,7 @@ export const MetadataItemCard: React.FC<MetadataItemCardProps> = ({
                         type="button"
                         onClick={() => onGeneratePrompt(asset.id)}
                         disabled={asset.promptGenerating}
+                        data-preserve-white="true"
                         className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-orange-600/90 hover:bg-orange-500 text-white font-semibold transition-colors cursor-pointer disabled:opacity-50"
                       >
                         <Zap className={`w-3 h-3 ${asset.promptGenerating ? 'animate-spin' : ''}`} />

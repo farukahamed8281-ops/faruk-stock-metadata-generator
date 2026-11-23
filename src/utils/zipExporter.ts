@@ -1,7 +1,27 @@
 import JSZip from 'jszip';
 import { StockAsset, Marketplace } from '../types';
 import { injectMetadataIntoFile } from './metadataEmbedder';
-import { generateCsvContent } from './csvExporter';
+import {
+  generateCsvContent,
+  generateRenamedFilename,
+  resolveBatchExportFilenames,
+} from './csvExporter';
+import { normalizeCategoryForMarketplace } from './stockSeoSanitizer';
+
+const isPlaceholderTopic = (val?: string): boolean => {
+  const norm = (val || '').trim().toLowerCase();
+  return !norm || norm === 'general stock' || norm === 'stock design' || norm === 'stock topic' || norm === 'stock asset' || norm === 'general';
+};
+
+const resolveCleanTopic = (...candidates: (string | undefined)[]): string => {
+  for (const c of candidates) {
+    const trimmed = (c || '').trim();
+    if (trimmed && !isPlaceholderTopic(trimmed)) return trimmed;
+  }
+  return 'Stock Media';
+};
+
+export { generateRenamedFilename };
 
 export interface ZipExportOptions {
   marketplace?: Marketplace;
@@ -12,45 +32,12 @@ export interface ZipExportOptions {
   authorName?: string;
   defaultTopic?: string;
   saveJpegInFolder?: boolean;
+  includeMetadataTxt?: boolean;
 }
 
-/**
- * Generates a clean, filesystem-safe filename from asset title
- * e.g. "Architect reviewing blueprints" -> "Architect_reviewing_blueprints_202608290431.jpeg"
- */
-export function generateRenamedFilename(
-  originalFilename: string,
-  title: string,
-  targetExtension?: string,
-  includeTimestamp: boolean = false
-): string {
-  const originalExt = originalFilename.split('.').pop() || 'jpg';
-  const cleanExt = targetExtension && targetExtension.toLowerCase() !== 'default'
-    ? targetExtension.trim().replace(/^\./, '')
-    : originalExt;
-
-  if (!title || !title.trim()) {
-    return originalFilename.replace(/\.[^/.]+$/, '') + '.' + cleanExt;
-  }
-
-  // Clean title for safe filesystem name
-  let cleanTitle = title
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .slice(0, 120)
-    .replace(/_+$/, '');
-
-  if (!cleanTitle) cleanTitle = 'Stock_Asset';
-
-  if (includeTimestamp) {
-    const d = new Date();
-    const ts = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    return `${cleanTitle}_${ts}.${cleanExt}`;
-  }
-
-  return `${cleanTitle}.${cleanExt}`;
+export interface ZipExportResult {
+  packagedCount: number;
+  missingRawFilesCount: number;
 }
 
 export async function exportAssetsToZip(
@@ -58,8 +45,10 @@ export async function exportAssetsToZip(
   marketplace: Marketplace = 'Adobe Stock',
   targetExtension?: string,
   options?: ZipExportOptions
-): Promise<void> {
-  if (!assets || assets.length === 0) return;
+): Promise<ZipExportResult> {
+  if (!assets || assets.length === 0) {
+    return { packagedCount: 0, missingRawFilesCount: 0 };
+  }
 
   const zip = new JSZip();
   const autoRename = options?.autoRenameToTitle ?? true;
@@ -67,45 +56,39 @@ export async function exportAssetsToZip(
   const embedExif = options?.embedExifMetadata ?? true;
   const defaultTopic = options?.defaultTopic || 'Stock Design';
   const saveJpegInFolder = options?.saveJpegInFolder ?? false;
+  const includeMetadataTxt = options?.includeMetadataTxt ?? false;
 
-  const getExportFilename = (asset: StockAsset) => {
-    if (autoRename && asset.title) {
-      return generateRenamedFilename(asset.filename, asset.title, targetExtension, includeTimestamp);
-    }
-    const cleanExt = targetExtension && targetExtension.toLowerCase() !== 'default'
-      ? targetExtension.trim().replace(/^\./, '')
-      : null;
-    if (!cleanExt) return asset.filename;
-    return asset.filename.replace(/\.[^/.]+$/, '') + '.' + cleanExt;
-  };
+  // Resolve guaranteed collision-free filenames shared identically between CSV rows and image files inside ZIP
+  const exportFilenames = resolveBatchExportFilenames(
+    assets,
+    targetExtension,
+    autoRename,
+    includeTimestamp
+  );
 
-  // 1. Generate and add marketplace CSV file to ZIP (matching standalone CSV exporter & timestamped filenames if enabled)
-  let csvContent = generateCsvContent(assets, marketplace, targetExtension, autoRename);
-  if (includeTimestamp) {
-    assets.forEach((asset) => {
-      const noTs = autoRename && asset.title
-        ? generateRenamedFilename(asset.filename, asset.title, targetExtension, false)
-        : getExportFilename(asset);
-      const withTs = getExportFilename(asset);
-      if (noTs !== withTs) {
-        csvContent = csvContent.replace(`"${noTs}"`, `"${withTs}"`);
-      }
-    });
-  }
-
+  // 1. Generate and add marketplace CSV file to ZIP
+  const csvContent = generateCsvContent(
+    assets,
+    marketplace,
+    targetExtension,
+    autoRename,
+    includeTimestamp,
+    exportFilenames
+  );
   const csvName = `${marketplace.toLowerCase().replace(/\s+/g, '_')}_metadata.csv`;
   zip.file(csvName, csvContent);
 
-  // 2. Add individual metadata text/json documentation folder
-  const metadataFolder = zip.folder('metadata_files');
-  assets.forEach((asset) => {
-    const exportName = getExportFilename(asset);
-    const baseName = exportName.replace(/\.[^/.]+$/, '');
-    const safeTopic = asset.topic || asset.category || defaultTopic;
+  // 2. Optional text documentation folder (disabled by default to keep ZIP clean & marketplace-ready)
+  if (includeMetadataTxt) {
+    const metadataFolder = zip.folder('metadata_files');
+    assets.forEach((asset, idx) => {
+      const exportName = exportFilenames[idx];
+      const baseName = exportName.replace(/\.[^/.]+$/, '');
+      const cleanCategory = normalizeCategoryForMarketplace(asset.category, marketplace);
+      const safeTopic = resolveCleanTopic(asset.topic, cleanCategory, defaultTopic);
+      const resolvedAuthor = asset.author || options?.authorName?.trim() || '';
 
-    const resolvedAuthor = asset.author || options?.authorName?.trim() || '';
-
-    const txtContent = `=== FarukStock AI Metadata ===
+      const txtContent = `=== FarukStock AI Metadata ===
 Target Marketplace: ${marketplace}
 Exported Filename: ${exportName}
 Original Filename: ${asset.filename}
@@ -120,36 +103,47 @@ ${safeTopic}
 Rating: 5 Stars (⭐⭐⭐⭐⭐)
 
 Description (Comments / XPComment):
-${asset.description}
+${asset.description || '(None)'}
 
 Tags / Keywords (${asset.keywords?.length || 0} items):
 ${(asset.keywords || []).join(', ')}
 
 Embedded Formats:
-- Windows EXIF: XPTitle, XPSubject, Rating=5, XPKeywords, XPComment${resolvedAuthor ? `, Artist (${resolvedAuthor})` : ''}
-- IPTC-IIM: ObjectName, Headline, Category, Keywords, Caption${resolvedAuthor ? `, By-line (${resolvedAuthor})` : ''}
-- Adobe XMP: dc:title, dc:subject, dc:description, xmp:Rating=5, photoshop:Category${resolvedAuthor ? `, dc:creator (${resolvedAuthor})` : ''}
+- Windows EXIF: XPTitle, XPSubject, Rating=5, XPKeywords${asset.description ? ', XPComment' : ''}${resolvedAuthor ? `, Artist (${resolvedAuthor})` : ''}
+- IPTC-IIM: ObjectName, Headline, Category, Keywords${asset.description ? ', Caption' : ''}${resolvedAuthor ? `, By-line (${resolvedAuthor})` : ''}
+- Adobe XMP: dc:title, dc:subject${asset.description ? ', dc:description' : ''}, xmp:Rating=5, photoshop:Category${resolvedAuthor ? `, dc:creator (${resolvedAuthor})` : ''}
 `;
-    metadataFolder?.file(`${baseName}_metadata.txt`, txtContent);
-  });
+      metadataFolder?.file(`${baseName}_metadata.txt`, txtContent);
+    });
+  }
 
   // 3. Losslessly embed EXIF/IPTC/XMP into actual image files and bundle in ZIP
   const targetFolder = saveJpegInFolder ? zip.folder('images') || zip : zip;
+  const maxKeywordsLimit = marketplace === 'Adobe Stock' ? 49 : 50;
+  const requiresCaption = ['Shutterstock', 'Getty Images', 'iStock', 'Dreamstime'].includes(marketplace);
+  let packagedCount = 0;
+  let missingRawFilesCount = 0;
 
-  for (const asset of assets) {
-    const exportName = getExportFilename(asset);
-    const safeTopic = asset.topic || asset.category || defaultTopic;
+  for (let i = 0; i < assets.length; i++) {
+    const asset = assets[i];
+    const exportName = exportFilenames[i];
+    const cleanCategory = normalizeCategoryForMarketplace(asset.category, marketplace);
+    const safeTopic = resolveCleanTopic(asset.topic, cleanCategory, defaultTopic);
     const assetAuthor = asset.author || options?.authorName?.trim() || undefined;
+    const cappedKeywords = (asset.keywords || []).slice(0, maxKeywordsLimit);
+    const embedDesc = (asset.description || '').trim() || (requiresCaption ? (asset.title || '') : '');
 
     let sourceBlob: Blob | null = null;
 
-    if (asset.file) {
+    if (asset.file instanceof Blob) {
       sourceBlob = asset.file;
-    } else if (asset.previewUrl && asset.previewUrl.startsWith('data:')) {
-      // Convert data URL to Blob
+    } else if (asset.previewUrl && (asset.previewUrl.startsWith('data:') || asset.previewUrl.startsWith('https://'))) {
       try {
         const res = await fetch(asset.previewUrl);
-        sourceBlob = await res.blob();
+        if (res.ok) {
+          const fetched = await res.blob();
+          if (fetched.size > 0) sourceBlob = fetched;
+        }
       } catch {
         sourceBlob = null;
       }
@@ -158,26 +152,31 @@ Embedded Formats:
     if (sourceBlob) {
       if (embedExif) {
         try {
-          // Inject lossless EXIF / IPTC / XMP metadata (0% quality loss)
+          // Inject lossless EXIF / IPTC / XMP metadata without falling back to Title for Description on Adobe Stock
           const { buffer } = await injectMetadataIntoFile(sourceBlob, exportName, {
             title: asset.title || asset.filename,
             topic: safeTopic,
-            category: asset.category,
-            description: asset.description || asset.title || asset.filename,
-            keywords: asset.keywords || [],
+            category: cleanCategory,
+            description: embedDesc,
+            keywords: cappedKeywords,
             rating: 5,
             author: assetAuthor,
           });
           targetFolder.file(exportName, buffer);
+          packagedCount++;
         } catch (embedErr) {
           console.warn('Fallback embedding for file:', exportName, embedErr);
           const rawBuffer = await sourceBlob.arrayBuffer();
           targetFolder.file(exportName, rawBuffer);
+          packagedCount++;
         }
       } else {
         const rawBuffer = await sourceBlob.arrayBuffer();
         targetFolder.file(exportName, rawBuffer);
+        packagedCount++;
       }
+    } else {
+      missingRawFilesCount++;
     }
   }
 
@@ -192,4 +191,6 @@ Embedded Formats:
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+
+  return { packagedCount, missingRawFilesCount };
 }

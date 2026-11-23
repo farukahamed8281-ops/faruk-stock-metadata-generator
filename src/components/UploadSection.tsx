@@ -157,7 +157,6 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
                   ? {
                       borderColor: activeColor,
                       backgroundColor: `${activeColor}1f`,
-                      color: '#ffffff',
                       boxShadow: `0 0 18px ${activeColor}35`,
                     }
                   : undefined
@@ -198,7 +197,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           ref={fileInputRef}
           onChange={handleFileChange}
           multiple
-          accept="image/*,video/*,.eps,.ai,.pdf"
+          accept="image/*,video/*,.svg,.eps,.ai,.pdf,.mkv,.m4v"
           className="hidden"
         />
 
@@ -245,7 +244,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
               </span>
             </p>
             <p className="text-xs text-gray-400 mt-1.5 font-medium">
-              Supported: JPG, PNG, GIF, MP4, MOV, EPS, AI, PDF
+              Supported: JPG, PNG, WebP, SVG, MP4, MOV, MKV, EPS, AI, PDF
             </p>
           </div>
         ) : (
@@ -397,6 +396,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           type="button"
           onClick={onGenerate}
           disabled={isGenerating || assets.length === 0}
+          data-preserve-white="true"
           className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-white text-sm font-extrabold transition-all hover:brightness-110 cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
           style={{
             backgroundColor: activeColor,

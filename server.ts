@@ -6,7 +6,7 @@ import os from 'os';
 import JSZip from 'jszip';
 import { execFile } from 'child_process';
 import util from 'util';
-import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel, MediaResolution } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import {
   getMarketplaceSeoProfile,
@@ -54,6 +54,7 @@ const port = 3000;
 
 // In-memory short cooldown map so rate-limited/exhausted API keys are immediately skipped for healthy keys
 const serverKeyCooldownUntil = new Map<string, number>();
+const serverUnsupportedModelUntil = new Map<string, number>();
 
 function prioritizeHealthyServerKeys(keys: string[]): string[] {
   const now = Date.now();
@@ -358,17 +359,21 @@ app.post('/api/generate-image-prompt', async (req: Request, res: Response) => {
       keyCandidates.push(process.env.GEMINI_API_KEY.trim());
     }
 
-    for (const clientKey of keyCandidates) {
+    const geminiPromptKeys = prioritizeHealthyServerKeys(
+      keyCandidates.filter((k) => !k.startsWith('gsk_'))
+    );
+    const promptModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+
+    for (const clientKey of geminiPromptKeys) {
       if (imageData && imageData.startsWith('data:')) {
-        try {
-          const promptGenClient = new GoogleGenAI({
-            apiKey: clientKey,
-            httpOptions: {
-              headers: {
-                'User-Agent': 'aistudio-build',
-              },
+        const promptGenClient = new GoogleGenAI({
+          apiKey: clientKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
             },
-          });
+          },
+        });
 
         const promptText = `
 You are a world-class AI Image Prompt Engineer specializing in Reverse Prompt Generation (Image-to-Prompt) for Google Gemini AI (Imagen 3), Flow AI / Recraft, Midjourney v6, Flux.1, and DALL-E 3.
@@ -407,62 +412,67 @@ REQUIRED REVERSE PROMPT ANALYSIS:
         });
         contents.push({ text: promptText });
 
-        let response: any = null;
-        try {
-          response = await promptGenClient.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: contents,
-            config: {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  mainPrompt: { type: Type.STRING, description: 'Universal high-fidelity prompt' },
-                  geminiPrompt: { type: Type.STRING, description: 'Google Gemini AI / Imagen 3 photographic prompt' },
-                  flowPrompt: { type: Type.STRING, description: 'Flow AI stylized generative prompt' },
-                  midjourneyPrompt: { type: Type.STRING, description: 'Midjourney v6 formatted prompt with parameters' },
-                  dallePrompt: { type: Type.STRING, description: 'DALL-E 3 descriptive prompt' },
-                  fluxPrompt: { type: Type.STRING, description: 'Flux.1 photorealistic prompt' },
-                  negativePrompt: { type: Type.STRING, description: 'Negative prompt for Stable Diffusion / Flux / Flow' },
-                  styleBreakdown: {
+        for (const pModel of promptModels) {
+          try {
+            const response: any = await Promise.race([
+              promptGenClient.models.generateContent({
+                model: pModel,
+                contents: contents,
+                config: {
+                  ...(pModel.startsWith('gemini-4')
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                    : pModel === 'gemini-3.1-flash-lite'
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+                    : { thinkingConfig: { thinkingBudget: 0 } }),
+                  responseMimeType: 'application/json',
+                  responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                      subject: { type: Type.STRING },
-                      lighting: { type: Type.STRING },
-                      camera: { type: Type.STRING },
-                      composition: { type: Type.STRING },
-                      colorPalette: { type: Type.STRING },
+                      mainPrompt: { type: Type.STRING, description: 'Universal high-fidelity prompt' },
+                      geminiPrompt: { type: Type.STRING, description: 'Google Gemini AI / Imagen 3 photographic prompt' },
+                      flowPrompt: { type: Type.STRING, description: 'Flow AI stylized generative prompt' },
+                      midjourneyPrompt: { type: Type.STRING, description: 'Midjourney v6 formatted prompt with parameters' },
+                      dallePrompt: { type: Type.STRING, description: 'DALL-E 3 descriptive prompt' },
+                      fluxPrompt: { type: Type.STRING, description: 'Flux.1 photorealistic prompt' },
+                      negativePrompt: { type: Type.STRING, description: 'Negative prompt for Stable Diffusion / Flux / Flow' },
+                      styleBreakdown: {
+                        type: Type.OBJECT,
+                        properties: {
+                          subject: { type: Type.STRING },
+                          lighting: { type: Type.STRING },
+                          camera: { type: Type.STRING },
+                          composition: { type: Type.STRING },
+                          colorPalette: { type: Type.STRING },
+                        },
+                        required: ['subject', 'lighting', 'camera', 'composition', 'colorPalette'],
+                      },
                     },
-                    required: ['subject', 'lighting', 'camera', 'composition', 'colorPalette'],
+                    required: ['mainPrompt', 'geminiPrompt', 'flowPrompt', 'midjourneyPrompt', 'dallePrompt', 'fluxPrompt', 'negativePrompt', 'styleBreakdown'],
                   },
                 },
-                required: ['mainPrompt', 'geminiPrompt', 'flowPrompt', 'midjourneyPrompt', 'dallePrompt', 'fluxPrompt', 'negativePrompt', 'styleBreakdown'],
-              },
-            },
-          });
-        } catch (callErr: any) {
-          const errStr = (callErr?.message || '').toLowerCase();
-          if (errStr.includes('401') || errStr.includes('unauthenticated') || errStr.includes('access_token_type_unsupported')) {
-            console.info('[Auth] Skipped unauthenticated key for reverse prompt generation.');
-            break;
-          }
-        }
+              }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Prompt timeout')), 18000)),
+            ]);
 
-        if (response && response.text) {
-          const parsed = parseAiJsonResponse(response.text);
-          if (parsed && parsed.mainPrompt) {
-            return res.json({
-              ...parsed,
-              source: 'Google Gemini Vision Prompt Engine',
-            });
+            if (response && response.text) {
+              const parsed = parseAiJsonResponse(response.text);
+              if (parsed && parsed.mainPrompt) {
+                return res.json({
+                  ...parsed,
+                  source: `Google Gemini Vision Prompt Engine (${pModel})`,
+                });
+              }
+            }
+          } catch (callErr: any) {
+            const errStr = (callErr?.message || '').toLowerCase();
+            if (errStr.includes('401') || errStr.includes('unauthenticated') || errStr.includes('access_token_type_unsupported') || errStr.includes('429') || errStr.includes('quota')) {
+              console.info(`[Prompt] Key skipped/cooldown (${pModel}).`);
+              break;
+            }
           }
         }
-      } catch {
-        // Fallback to next candidate
       }
     }
-  }
 
     // Fallback response
     const fallback = generateFallbackImagePrompt(filename, category, targetGenerator, aspectRatio);
@@ -494,11 +504,15 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
     // Groq verification
     if (provider === 'Groq Cloud' || trimmedKey.startsWith('gsk_')) {
       try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 10000);
         const groqResp = await fetch('https://api.groq.com/openai/v1/models', {
           headers: {
             'Authorization': `Bearer ${trimmedKey}`,
           },
+          signal: controller.signal,
         });
+        clearTimeout(tid);
         if (groqResp.ok) {
           return res.json({
             valid: true,
@@ -519,8 +533,15 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 
     // Google Gemini live verification
     // 1. Direct query to Google's Generative Language models API
+    let explicitAuthRejected = false;
     try {
-      const googleResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(trimmedKey)}`);
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 10000);
+      const googleResp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(trimmedKey)}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(tid);
       const googleData: any = await googleResp.json().catch(() => ({}));
 
       if (googleResp.ok && googleData?.models) {
@@ -531,22 +552,22 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
         });
       }
 
-      // Check if Google returned an invalid key error
       const errMsg = googleData?.error?.message || '';
       if (
         errMsg.includes('API_KEY_INVALID') ||
         errMsg.includes('API key not valid') ||
         errMsg.includes('PERMISSION_DENIED') ||
         errMsg.includes('expired') ||
+        googleResp.status === 400 ||
         googleData?.error?.status === 'INVALID_ARGUMENT'
       ) {
+        explicitAuthRejected = true;
         return res.status(400).json({
           valid: false,
           error: 'Google API Key is invalid or expired. Please get a fresh key from aistudio.google.com/app/apikey',
         });
       }
 
-      // If Google returned 503 (high demand) or 429 (quota), the key is authentic!
       if (googleResp.status === 503 || googleResp.status === 429 || errMsg.includes('high demand') || errMsg.includes('RESOURCE_EXHAUSTED')) {
         return res.json({
           valid: true,
@@ -569,6 +590,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 
     let lastError = 'Authentication failed. Please check your API key.';
     let verifiedModel = '';
+    let hadNetworkReachabilityError = false;
 
     for (const model of candidateModels) {
       try {
@@ -580,29 +602,36 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
             },
           },
         });
-        const response = await client.models.generateContent({
-          model: model,
-          contents: 'Ping',
-        });
+        const response: any = await Promise.race([
+          client.models.generateContent({
+            model: model,
+            contents: 'Ping',
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 10000)),
+        ]);
         if (response && (response.text !== undefined || response.candidates?.length)) {
           verifiedModel = model;
           break;
         }
       } catch (err: any) {
         const errMsg = err?.message || '';
-        if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || errMsg.includes('PERMISSION_DENIED')) {
+        const errLower = errMsg.toLowerCase();
+        if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || errMsg.includes('PERMISSION_DENIED') || errLower.includes('401') || errLower.includes('unauthenticated')) {
+          explicitAuthRejected = true;
           return res.status(400).json({
             valid: false,
             error: 'Google API Key is invalid or expired. Please generate a new key from aistudio.google.com/app/apikey',
           });
         }
-        // If 503 high demand or 429 quota, key is verified!
         if (errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
           return res.json({
             valid: true,
             model: model,
             message: 'Google Gemini API Key authenticated and added to rotation pool!',
           });
+        }
+        if (errLower.includes('timeout') || errLower.includes('fetch') || errLower.includes('econn') || errLower.includes('network')) {
+          hadNetworkReachabilityError = true;
         }
         lastError = errMsg || lastError;
       }
@@ -612,16 +641,15 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
       return res.json({ valid: true, model: verifiedModel, message: `Google Gemini API Key active & verified with ${verifiedModel}!` });
     }
 
-    // Accept valid format as fallback if Google's server was temporarily unreachable
-    if ((trimmedKey.startsWith('AIzaSy') || trimmedKey.startsWith('AQ.')) && trimmedKey.length >= 25) {
+    // Only accept format fallback when upstream Google endpoint had reachability timeout (never on explicit auth reject)
+    if (!explicitAuthRejected && hadNetworkReachabilityError && (trimmedKey.startsWith('AIzaSy') || trimmedKey.startsWith('AQ.')) && trimmedKey.length >= 25) {
       return res.json({
         valid: true,
         model: 'gemini-4-hydrogen',
-        message: 'Google Gemini API Key accepted and activated!',
+        message: 'Google Gemini API Key format validated and activated!',
       });
     }
 
-    // If all model pings failed due to bad key
     return res.status(400).json({
       valid: false,
       error: `Invalid Google API Key: ${lastError}`,
@@ -736,9 +764,9 @@ app.post('/api/video-prepare/finalize', async (req: Request, res: Response) => {
             '-frames:v',
             '1',
             '-vf',
-            "scale='min(640,iw)':-2",
+            "scale='min(960,iw)':-2",
             '-q:v',
-            '4',
+            '2',
             framePath,
           ],
           { timeout: 25000 }
@@ -886,24 +914,33 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
       });
     }
 
-    // All supported active Gemini models
-    const allGeminiModels = [
+    const wantsGroq = aiProvider === 'Groq Cloud';
+    const providerKeys = keyCandidates.filter((k) => (wantsGroq ? k.startsWith('gsk_') : !k.startsWith('gsk_')));
+    if (providerKeys.length === 0) {
+      return res.status(401).json({
+        error: wantsGroq
+          ? 'No valid Groq Cloud API Key found (must start with gsk_). Please add one in API Key settings.'
+          : 'No valid Google Gemini API Key found. Please add your Gemini API Key in API Key settings.',
+      });
+    }
+
+    // Free fast Gemini models first; ALWAYS honor user's explicitly requested model first in pool
+    const freeFastModels = [
       'gemini-4-hydrogen',
       'gemini-3.1-flash-lite',
       'gemini-2.5-flash',
-      'gemini-4-neon',
-      'gemini-3.1-pro-preview',
     ];
+    const requestedModel = model && typeof model === 'string' ? model.trim() : '';
+    const candidateModelPool = [
+      ...(requestedModel && !requestedModel.includes('llama') ? [requestedModel] : []),
+      ...freeFastModels,
+    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
-    const modelsToTry: string[] = [];
-    if (model && typeof model === 'string' && allGeminiModels.includes(model.trim())) {
-      modelsToTry.push(model.trim());
-    }
-    for (const m of allGeminiModels) {
-      if (!modelsToTry.includes(m)) {
-        modelsToTry.push(m);
-      }
-    }
+    const nowMs = Date.now();
+    const activeModels = candidateModelPool.filter(
+      (m) => (serverUnsupportedModelUntil.get(m) || 0) <= nowMs
+    );
+    const modelsToTry = activeModels.length > 0 ? activeModels : candidateModelPool;
 
     let serverProxyVideoDataUrl = '';
     if (isValidPrepId(videoProxyId)) {
@@ -920,13 +957,13 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
     let lastApiErrorMessage = 'AI metadata generation failed.';
     let lastHttpStatus = 502;
 
-    const orderedServerKeys = prioritizeHealthyServerKeys(keyCandidates);
+    const orderedServerKeys = prioritizeHealthyServerKeys(providerKeys);
     const hasMultipleKeys = orderedServerKeys.length > 1;
 
     // Iterate through this user's own key candidates (Per-Session Rotation, healthy keys first)
     for (let keyIdx = 0; keyIdx < orderedServerKeys.length; keyIdx++) {
       const clientKey = orderedServerKeys[keyIdx];
-      const useGroq = aiProvider === 'Groq Cloud' || clientKey.startsWith('gsk_');
+      const useGroq = wantsGroq;
 
       const profile = getMarketplaceSeoProfile(marketplace as any, titleLength, keywordsCount);
       const hasVisualData = Boolean(imageData && typeof imageData === 'string' && imageData.includes('base64') && !imageData.startsWith('data:image/svg+xml'));
@@ -946,14 +983,18 @@ app.post('/api/generate-metadata', async (req: Request, res: Response) => {
       const promptText = `
 ${profile.systemPrompt}
 
-TASK (100% VISUAL ACCURACY MANDATE):
+TASK (95-99% PIXEL-PRECISION VISUAL ACCURACY MANDATE):
 ${hasDirectVideo
-  ? `Watch the attached video clip from start to finish and describe PRECISELY what happens across the clip (subjects, motion, camera movement, setting, lighting) with ZERO guesswork. DO NOT rely on meaningless filenames like "${filename}".`
+  ? `Watch the attached video clip from start to finish and describe PRECISELY what happens across the clip (subjects, motion, camera movement, setting, lighting) with ZERO guesswork. Analyze ONLY the visual pixels and never guess external context.`
   : hasVisualData
   ? fileType === 'video'
-    ? `Inspect the provided 4-frame chronological video storyboard (15%, 40%, 65%, 85% timestamps) and describe PRECISELY the subject, action progression, camera motion, lighting, and setting with ZERO guesswork. DO NOT rely on meaningless filenames like "${filename}".`
-    : `Inspect the provided image directly and describe PRECISELY what is visibly depicted with ZERO guesswork or false assumptions. DO NOT rely on meaningless filenames like "${filename}" or camera numbers like "121 (46).jpg".`
-  : `No raster preview could be extracted for "${filename}" (${fileType}). Base metadata ONLY on clear factual words in filename/topic/instructions without inventing unrelated scenes.`
+    ? `Inspect the provided 4-frame chronological video storyboard (15%, 40%, 65%, 85% timestamps) and describe PRECISELY the subject, action progression, camera motion, lighting, and setting with ZERO guesswork.`
+    : `Perform a thorough pixel-level visual inspection across ALL zones of the image BEFORE writing Title, Category, or Keywords:
+1. Main subject, materials, hardware/anatomy, uniform/clothing, and exact physical state (e.g., robotic gripper holding 4TB hot-swap SSD drive, tactical sleeve ECG/GPS wrist monitor vs sports watch, white EV autonomous cabin with panoramic glass roof and no steering wheel).
+2. Exact readable labels, numbers, and printed/screen text (only include text visibly readable—e.g. "4TB", "HOT-SWAP", "AUTO DRIVE ACTIVE", "COPY SPACE"). Never use "4k" in keywords on still photos even if printed on hardware.
+3. Screen/hologram UI icons & graphics (heartbeat waveform, GPS pin, shield wireframe, data chart, network globe).
+4. Background setting, depth/bokeh, motion-blur effects, lighting temperature, and whether large clean negative/copy space exists (tag "copy", "space" only when clearly present).`
+  : `No raster preview could be extracted for "${filename}" (${fileType}). Base metadata ONLY on clear factual words in topic/instructions or clean filename nouns without inventing unrelated scenes.`
 }
 ${videoDirective}${imageFramingNote}
 ADDITIONAL ASSET PARAMETERS:
@@ -962,11 +1003,11 @@ ${advanceIsolatedWhite ? `- ADVANCE TITLE REQUIREMENT: The asset is on a WHITE b
 ${advanceVector ? '- ADVANCE ART STYLE: Include "Vector" in title and vector tags in keywords.' : ''}
 ${advanceIllustration ? '- ADVANCE ART STYLE: Include "Illustration" in title and illustration tags in keywords.' : ''}
 ${includeConceptualKeywords ? `
-- CONCEPTUAL KEYWORDS (3-5 ABSTRACT & EMOTION TAGS):
-Analyze the underlying mood, emotional resonance, and commercial message (e.g. "hope", "future", "innovation", "growth", "wellbeing", "sustainability").
-Include those 3-5 top conceptual/abstract keywords inside the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
+- CONCEPTUAL KEYWORDS (3-5 SCENE-ACCURATE ABSTRACT TAGS):
+Analyze the true commercial purpose and mood of THIS exact image (e.g., efficiency, precision, security, telemetry, diagnostics, autonomy, reliability, connectivity, protection, sustainability). Avoid lazily repeating cliché filler like "innovation" or "future" unless directly fitting.
+Include those 3-5 conceptual single-word terms inside the main "keywords" array AND list them separately in "conceptualKeywords".` : ''}
 - Description: ${descLength === 0 ? 'Strictly EMPTY string "" since description length is set to 0.' : marketplace === 'Shutterstock' ? `Rich, complete, searchable Shutterstock title-sentence strictly within ${Math.max(120, descLength)} characters (max 200 chars).` : `Concise, natural commercial description sentence under ${descLength} characters (never mid-word).`}
-- Category & Topic: Pick ONE exact official ${marketplace} category plus concise 2-3 word subject topic.
+- Category & Topic: Pick ONE exact official ${marketplace} category (e.g., Transport for vehicles/EV cabins/road barriers/highways; Industry for factory robots/recycling/warehouses; Science for surgical/labs/medicine/space stations; People for human hands/portraits; Technology for servers/chips/cameras/biometrics) plus a clean 2-3 word Subject/Topic.
 
 ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemPrompt ? `ADDITIONAL CONTRIBUTOR INSTRUCTIONS:\n${customPrompt.trim()}` : ''}
 `;
@@ -987,15 +1028,18 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
           }
           userContent.push({
             type: 'text',
-            text: `${promptText}\nOutput ONLY valid JSON matching: {"title":"...","topic":"...","description":"...","keywords":["..."],"conceptualKeywords":["..."],"category":"..."}`,
+            text: `${promptText}\nOutput ONLY valid JSON matching: {"visualAudit":"...","title":"...","topic":"...","description":"...","keywords":["..."],"conceptualKeywords":["..."],"category":"..."}`,
           });
 
+          const groqController = new AbortController();
+          const groqTid = setTimeout(() => groqController.abort(), 25000);
           const groqResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${clientKey}`,
               'Content-Type': 'application/json',
             },
+            signal: groqController.signal,
             body: JSON.stringify({
               model: groqModel,
               messages: [{ role: 'user', content: userContent }],
@@ -1004,6 +1048,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               response_format: { type: 'json_object' },
             }),
           });
+          clearTimeout(groqTid);
 
           const groqData: any = await groqResp.json().catch(() => ({}));
           if (!groqResp.ok) {
@@ -1037,7 +1082,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             }
 
             const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-            const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any);
+            const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any, fileType as any);
             const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
               ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
               : [];
@@ -1108,6 +1153,11 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             responseSchema: {
               type: Type.OBJECT,
               properties: {
+                visualAudit: {
+                  type: Type.STRING,
+                  description:
+                    'Brief 15-25 word pixel check: main subject/materials, readable labels, UI icons, setting/lighting.',
+                },
                 title: { type: Type.STRING, description: 'Accurate stock title' },
                 topic: { type: Type.STRING, description: 'Core subject matter (2-4 words)' },
                 description: { type: Type.STRING, description: 'Accurate commercial description sentence' },
@@ -1123,27 +1173,52 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
                 },
                 category: { type: Type.STRING, description: `Official ${marketplace} category name` },
               },
-              required: ['title', 'topic', 'description', 'keywords', 'category'],
+              required: ['visualAudit', 'title', 'topic', 'description', 'keywords', 'category'],
             },
           };
 
-          if (isGemini4) {
-            config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          if (hasDirectVideo) {
+            config.mediaResolution = MediaResolution.MEDIA_RESOLUTION_MEDIUM;
+          } else if (hasVisualData) {
+            config.mediaResolution = MediaResolution.MEDIA_RESOLUTION_HIGH;
+          }
+
+          if (targetModel.startsWith('gemini-4')) {
+            config.thinkingConfig = {
+              thinkingLevel: targetModel === 'gemini-4-neon' ? ThinkingLevel.HIGH : ThinkingLevel.LOW,
+            };
+          } else if (targetModel === 'gemini-3.1-flash-lite') {
+            config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+          } else if (targetModel === 'gemini-2.5-flash') {
+            config.thinkingConfig = { thinkingBudget: 0 };
+            config.temperature = 0.15;
           } else {
             config.temperature = 0.15;
           }
 
           let response: any = null;
           try {
-            response = await genAiClient.models.generateContent({
-              model: targetModel,
-              contents: promptParts,
-              config,
-            });
+            const perCallTimeoutMs = hasDirectVideo ? 55_000 : 18_000;
+            response = await Promise.race([
+              genAiClient.models.generateContent({
+                model: targetModel,
+                contents: promptParts,
+                config,
+              }),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Timeout after ${perCallTimeoutMs}ms on ${targetModel}`)), perCallTimeoutMs)
+              ),
+            ]);
           } catch (modelCallErr: any) {
             const errMsg = modelCallErr?.message || 'Gemini API call failed';
             const errStr = errMsg.toLowerCase();
             lastApiErrorMessage = errMsg;
+
+            const isNotFound = errStr.includes('404') || errStr.includes('not found');
+            if (isNotFound) {
+              serverUnsupportedModelUntil.set(targetModel, Date.now() + 600_000);
+              continue;
+            }
 
             const isAuthError =
               errStr.includes('401') ||
@@ -1161,6 +1236,12 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               break;
             }
 
+            const isTimeout = errStr.includes('timeout');
+            if (isTimeout && hasMultipleKeys && keyIdx < orderedServerKeys.length - 1 && targetModel === modelsToTry[0]) {
+              console.info(`[Timeout] Key #${keyIdx + 1} timed out on ${targetModel}. Switching immediately to next API key...`);
+              break;
+            }
+
             const isRateLimit =
               errStr.includes('quota') ||
               errStr.includes('rate') ||
@@ -1170,13 +1251,12 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
             if (isRateLimit) {
               lastHttpStatus = 429;
               serverKeyCooldownUntil.set(clientKey, Date.now() + 45_000);
-              // If user has more API keys available and primary model hit quota, switch key IMMEDIATELY with zero delay
+              // Switch immediately to next healthy key on this primary working model without stalling
               if (hasMultipleKeys && keyIdx < orderedServerKeys.length - 1 && targetModel === modelsToTry[0]) {
                 console.info(`[Quota] Key #${keyIdx + 1} hit limit on ${targetModel}. Switching immediately to next API key...`);
                 break;
               }
-              console.info(`[Quota] Rate limit on ${targetModel}. Waiting 1.5s before fallback model...`);
-              await new Promise((r) => setTimeout(r, 1500));
+              await new Promise((r) => setTimeout(r, 250));
             }
           }
 
@@ -1197,7 +1277,7 @@ ${customPrompt && customPrompt.trim() && customPrompt.trim() !== profile.systemP
               }
 
               const rawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-              const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any);
+              const resKeywords = alignKeywordsWithTitle(resTitle, rawKeywords, keywordsCount || 30, marketplace as any, fileType as any);
               const conceptualKeywords: string[] = Array.isArray(parsed.conceptualKeywords)
                 ? parsed.conceptualKeywords.map((k: string) => String(k).toLowerCase().trim()).filter(Boolean)
                 : [];
@@ -1256,7 +1336,10 @@ async function addDirectoryToZip(dirPath: string, zip: JSZip, rootPath: string) 
         entry.name === '.env' ||
         entry.name.endsWith('.zip') ||
         entry.name.endsWith('.log') ||
-        entry.name.endsWith('.tmp')
+        entry.name.endsWith('.tmp') ||
+        relativePath === 'public/assets/aistudio' ||
+        relativePath.startsWith('public/assets/aistudio/') ||
+        /^public\/(crop_|test_|real_live_)/.test(relativePath)
       ) {
         continue;
       }
