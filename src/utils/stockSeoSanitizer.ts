@@ -326,17 +326,17 @@ const LOW_SEO_PRIORITY_TITLE_WORDS = new Set([
 ]);
 
 const STOP_WORDS = new Set([
-  'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'as', 'at',
-  'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by',
+  'a', 'about', 'above', 'across', 'after', 'again', 'against', 'all', 'along', 'am', 'among', 'an', 'and', 'any', 'are', 'around', 'as', 'at',
+  'be', 'because', 'been', 'before', 'behind', 'being', 'below', 'beside', 'besides', 'between', 'beyond', 'both', 'but', 'by',
   'could', 'did', 'do', 'does', 'doing', 'down', 'during',
   'each', 'few', 'for', 'from', 'further',
   'had', 'has', 'have', 'having', 'he', 'her', 'here', 'hers', 'herself', 'him', 'himself', 'his', 'how',
-  'i', 'if', 'in', 'into', 'is', 'it', 'its', 'itself',
+  'i', 'if', 'in', 'inside', 'into', 'is', 'it', 'its', 'itself',
   'just', 'me', 'more', 'most', 'my', 'myself',
-  'no', 'nor', 'not', 'now', 'of', 'off', 'on', 'once', 'only', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'over', 'own',
-  's', 'same', 'she', 'should', 'so', 'some', 'such',
-  't', 'than', 'that', 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too',
-  'under', 'until', 'up', 'very', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'with', 'would',
+  'near', 'no', 'nor', 'not', 'now', 'of', 'off', 'on', 'once', 'only', 'onto', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'outside', 'over', 'own',
+  's', 'same', 'she', 'should', 'since', 'so', 'some', 'such',
+  't', 'than', 'that', 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'throughout', 'to', 'too', 'toward', 'towards',
+  'under', 'until', 'up', 'upon', 'very', 'via', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'with', 'within', 'without', 'would',
   'you', 'your', 'yours', 'yourself', 'yourselves',
 ]);
 
@@ -363,7 +363,8 @@ const EARTH_CONTEXT_PREV_WORDS = new Set([
 
 const DANGLING_TRAILING_WORDS = new Set([
   'in', 'on', 'at', 'with', 'for', 'of', 'by', 'to', 'from', 'into', 'onto', 'over', 'under', 'near',
-  'and', 'or', 'the', 'a', 'an', 'as', 'via', 'through', 'between', 'among',
+  'and', 'or', 'the', 'a', 'an', 'as', 'via', 'through', 'between', 'among', 'across', 'along', 'around',
+  'behind', 'beside', 'beyond', 'inside', 'outside', 'toward', 'towards', 'upon', 'within', 'without',
 ]);
 
 const VIDEO_ONLY_SPAM_KEYWORDS = new Set([
@@ -772,33 +773,33 @@ export function alignKeywordsWithTitle(
       }
     }
 
-    const headLimit = Math.min(6, targetCount);
-    const headWords = dedupedSingleWords.slice(0, headLimit);
-    const tailWords = dedupedSingleWords.slice(headLimit);
+    const concreteTitleWords = titleWords.filter(
+      (w) => !LOW_SEO_PRIORITY_TITLE_WORDS.has(w) && !isKeywordBanned(w, marketplace, fileType)
+    );
 
-    // Find concrete buyer-searchable title words missing from top `targetCount` AI pool
-    // (Skip low-priority glue verbs/words like "setting", "performing", "attached", "mounted" so strong subject/visual nouns hold #7-12)
-    const topPool = dedupedSingleWords.slice(0, targetCount);
-    const missingTitleWords: string[] = [];
-    for (const w of titleWords) {
-      if (LOW_SEO_PRIORITY_TITLE_WORDS.has(w) || isKeywordBanned(w, marketplace, fileType)) continue;
-      const inTopPool = topPool.some((k) => wordsMatchExactOrPlural(k, w));
-      if (!inTopPool) {
-        const laterMatch = tailWords.find((k) => wordsMatchExactOrPlural(k, w));
-        missingTitleWords.push(laterMatch || w);
-      }
-    }
+    // Priority #1-6: Keep AI's leading core keywords that directly align with concrete Title nouns/adjectives,
+    // followed by any missing concrete Title words so Top-10 Sensei slots stay 100% locked to the Title.
+    const headCandidatePool = dedupedSingleWords.slice(0, Math.min(8, targetCount));
+    const titleAlignedHead = headCandidatePool.filter((k) =>
+      concreteTitleWords.some((tw) => wordsMatchExactOrPlural(k, tw))
+    );
 
-    // Assemble: #1-6 Core Subject+Synonyms -> any missing concrete Title words -> remaining ranked AI tiers up to targetCount
-    for (const tok of headWords) {
+    for (const tok of titleAlignedHead) {
       if (finalKeywords.length >= targetCount) break;
       pushKeyword(tok);
     }
-    for (const w of missingTitleWords) {
+
+    for (const w of concreteTitleWords) {
       if (finalKeywords.length >= targetCount) break;
-      pushKeyword(w);
+      const alreadyIncluded = finalKeywords.some((k) => wordsMatchExactOrPlural(k, w));
+      if (!alreadyIncluded) {
+        const aiPreferredForm = dedupedSingleWords.find((k) => wordsMatchExactOrPlural(k, w));
+        pushKeyword(aiPreferredForm || w);
+      }
     }
-    for (const tok of tailWords) {
+
+    // Fill remaining slots up to targetCount with AI's ranked synonyms, props, lighting, and conceptual tags
+    for (const tok of dedupedSingleWords) {
       if (finalKeywords.length >= targetCount) break;
       pushKeyword(tok);
     }
